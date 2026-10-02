@@ -5,7 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
   <title>臨床教師認證</title>
-  <link rel="stylesheet" href="app.css">
+  <!-- 版本號用來避免瀏覽器沿用舊的快取檔；更新程式時一併更換 -->
+  <link rel="stylesheet" href="app.css?v=20261002c">
 </head>
 <body>
 
@@ -46,16 +47,17 @@
       <nav id="nav" class="nav"></nav>
       <div class="who">
         <span id="whoText"></span>
+        <button id="pwBtn" class="btn btn-ghost" type="button">變更密碼</button>
         <button id="logoutBtn" class="btn btn-ghost" type="button">登出</button>
       </div>
     </header>
     <main id="content" class="content"></main>
-    <footer class="foot">資料更新時間：<span id="asOf">—</span>。本站不顯示姓名，一律以工號識別。</footer>
+    <footer class="foot">資料更新時間：<span id="asOf">—</span>。本站不存放姓名，以工號識別。</footer>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-  <script src="config.js"></script>
-  <script src="app.js"></script>
+  <script src="config.js?v=20261002c"></script>
+  <script src="app.js?v=20261002c"></script>
 </body>
 </html>

@@ -79,7 +79,24 @@ $('activateForm').onsubmit = async e => {
     await signIn(emp, pw);
   } catch (err) { showAuth('無法連線到開通服務，請稍後再試。'); }
 };
-$('logoutBtn').onclick = async () => { await sb.auth.signOut(); state.me = null; showAuth(); };
+$('logoutBtn').onclick = async () => { await sb.auth.signOut(); state.me = null; state.roster = null; showAuth(); };
+if ($('pwBtn')) $('pwBtn').onclick = () => {   // 頁面快取尚未更新時可能還沒有這顆按鈕
+  let dlg = $('pwDlg');
+  if (!dlg) { dlg = document.createElement('dialog'); dlg.id = 'pwDlg'; dlg.className = 'small-dlg'; document.body.appendChild(dlg); }
+  dlg.innerHTML = `<form id="pwForm" class="dlg-body"><h3>變更密碼</h3>
+    <label>新密碼（至少 8 個字元）<input id="pw1" type="password" minlength="8" autocomplete="new-password" required></label>
+    <label>再輸入一次<input id="pw2" type="password" minlength="8" autocomplete="new-password" required></label>
+    <p id="pwMsg" class="msg"></p>
+    <div style="display:flex;gap:8px"><button class="btn btn-primary" style="width:auto" type="submit">儲存</button><button class="btn btn-ghost" type="button" onclick="$('pwDlg').close()">取消</button></div></form>`;
+  dlg.showModal();
+  $('pwForm').onsubmit = async e => {
+    e.preventDefault();
+    if ($('pw1').value !== $('pw2').value) { $('pwMsg').textContent = '兩次輸入的密碼不一致。'; return; }
+    const { error } = await sb.auth.updateUser({ password: $('pw1').value });
+    if (error) { $('pwMsg').textContent = '變更失敗：' + error.message; return; }
+    dlg.close(); toast('密碼已變更');
+  };
+};
 
 // ---------- 共用資料 ----------
 async function fetchAll(build) {
@@ -145,10 +162,19 @@ async function showRecords(empId) {
   dlg.showModal();
   const { data, error } = await sb.from('course_records').select('course_title,course_date,category,teaching_hours,general_hours').eq('emp_id', empId).order('course_date', { ascending: false }).limit(500);
   dlg.innerHTML = `<div class="dlg-body">
-    <div class="dlg-head"><h3>修課紀錄｜工號 ${esc(empId)}　<small>${esc(info.dept || '')}・${esc(profGroup(info))}</small></h3><button class="btn btn-ghost" type="button" onclick="$('recDlg').close()">關閉</button></div>
+    <div class="dlg-head"><h3>修課紀錄｜工號 ${empLabel(empId)}　<small>${esc(info.dept || '')}・${esc(profGroup(info))}</small></h3><button class="btn btn-ghost" type="button" onclick="$('recDlg').close()">關閉</button></div>
     <div class="rule">${esc(info.status || '')}　系統採計教學點數 <b class="num">${esc(info.teach)}</b> / ${esc(info.need)}</div>
     ${error ? `<div class="empty">載入失敗：${esc(error.message)}</div>` : recordsTable(data, info, state.viewRef)}
     <div style="margin-top:10px"><button class="btn btn-ghost" type="button" onclick="$('recDlg').close();go('person','${esc(empId)}')">開啟這位同仁的完整頁面</button></div></div>`;
+}
+
+const nameOf = emp => (state.roster && state.roster.get(String(emp).toLowerCase()) || {}).name || '';
+const empLabel = emp => `${esc(emp)}${nameOf(emp) ? ` <span class="nm">${esc(nameOf(emp))}</span>` : ''}`;
+const nameBtn = () => (isAdmin() || state.role === 'dept_coordinator')
+  ? `<button class="btn btn-ghost" type="button" onclick="showNames()" title="姓名不存放在雲端；選擇您電腦上的員工名冊後，只在這個瀏覽器分頁內對照顯示">${state.roster ? '已顯示姓名' : '顯示姓名'}</button>` : '';
+async function showNames() {
+  if (state.roster) return;
+  try { await pickRoster(); go(state.view, state.arg); } catch (err) { toast(err.message, false); }
 }
 
 // 職類分組：護理依所屬單位再分為「護理部」與「非護理部」
@@ -225,6 +251,7 @@ async function boot() {
 
 function go(view, arg) {
   clearInterval(state.qrTimer);
+  if (view === 'person' && state.view !== 'person') state.backTo = state.view;
   state.view = view;
   $('nav').querySelectorAll('button').forEach(b => b.classList.toggle('is-active', b.dataset.view === view));
   $('content').innerHTML = '<div class="card empty">載入中…</div>';
@@ -247,11 +274,14 @@ function meter(label, value, need, unit = '點') {
 }
 
 async function renderPerson(empId, back) {
-  const [{ data: row, error }, { data: staff }, { data: records }, { data: apps }] = await Promise.all([
+  const own = empId === state.me.emp_id;
+  const [{ data: row, error }, { data: staff }, { data: records }, { data: apps }, { data: upcoming }, { data: myRegs }] = await Promise.all([
     sb.from('cert_status').select('*').eq('emp_id', empId).maybeSingle(),
     sb.from('staff').select('emp_id,dept,title,profession').eq('emp_id', empId).maybeSingle(),
     sb.from('course_records').select('course_title,course_date,category,teaching_hours,general_hours').eq('emp_id', empId).order('course_date', { ascending: false }).limit(500),
-    sb.from('applications').select('*').eq('emp_id', empId).order('submitted_at', { ascending: false }).limit(10)
+    sb.from('applications').select('*').eq('emp_id', empId).order('submitted_at', { ascending: false }).limit(10),
+    sb.from('courses').select('id,title,course_date,start_time,hours,main_category,sub_categories,location_detail').gte('course_date', today()).order('course_date').limit(20),
+    own ? sb.from('registrations').select('course_id').eq('emp_id', empId) : Promise.resolve({ data: [] })
   ]);
   if (error) throw error;
   if (!row) { $('content').innerHTML = '<div class="card empty">尚無此人員的認證資料。</div>'; return; }
@@ -264,14 +294,17 @@ async function renderPerson(empId, back) {
 
   const hero = `
     <section class="card hero tone-${esc(d.statusCode)}">
-      ${back ? '<button class="btn-link" type="button" onclick="go(\'dept\')">← 回名單</button><br>' : ''}
+      ${back ? `<button class="btn-link" type="button" onclick="go('${state.backTo || 'dept'}')">← 返回</button><br>` : ''}
       <span class="tag ${d.regime === 'legacy' ? 'legacy' : ''}">目前適用：${esc(d.regimeLabel)}</span>
       <div class="status">${esc(d.status)}</div>
       <div class="rule">${esc(d.trackLabel)}</div>
-      <div class="rule">工號 ${esc(empId)}｜${esc(staff?.dept || '')}｜${esc(staff?.title || '')}｜${esc(staff?.profession || '')}${cert ? `｜認證效期 ${esc(cert.valid_start_roc)}–${esc(cert.valid_end_roc)}` : ''}</div>
+      <div class="rule">工號 ${empLabel(empId)}｜${esc(staff?.dept || '')}｜${esc(staff?.title || '')}｜${esc(staff?.profession || '')}${cert ? `｜認證效期 ${esc(cert.valid_start_roc)}–${esc(cert.valid_end_roc)}` : ''}</div>
       <div class="reason">${esc(d.statusReason)}</div>
       ${(d.recommendations || []).length ? `<ul class="recs">${d.recommendations.map(r => `<li>${esc(r)}</li>`).join('')}</ul>` : ''}
-      ${certTrack && canAct && !pending ? `<details class="apply"><summary class="btn btn-ghost">${empId === state.me.emp_id ? '申請' : '代為提報'}臨床教師認證（${d.trackType === 'renewal' ? '展延' : '新增'}）</summary>
+      ${certTrack && canAct && !pending ? `<details class="apply"><summary class="btn ${d.initialEligible || d.renewalCompliant ? 'btn-primary' : 'btn-ghost'}" style="width:auto">${
+          d.initialEligible || d.renewalCompliant
+            ? `${empId === state.me.emp_id ? '申請' : '代為提報'}臨床教師認證（${d.trackType === 'renewal' ? '展延' : '新增'}）`
+            : '點數尚未達標；若另有院外修課時數，可按此提出申請'}</summary>
         <form id="applyForm" class="inline-form">
           <label>教學醫院服務年資（展延免填）<input id="apYears" type="number" step="0.1" min="0" value="${d.trackType === 'renewal' ? '' : esc(d.seniority)}"></label>
           <label>院外師資培育課程時數（選填：課名、主辦單位、日期、時數）<input id="apExt" type="text"></label>
@@ -280,6 +313,30 @@ async function renderPerson(empId, back) {
         </form></details>` : ''}
       ${pending ? '<div class="note">已有一筆審核中的申請。</div>' : ''}
     </section>`;
+
+  // 下一步：把「現在該做什麼」放在結論之後、細節之前
+  const eligible = certTrack && (d.initialEligible || d.renewalCompliant);
+  const gaps = [];
+  if ((d.missingBasicItems || []).length) gaps.push(`基礎項目尚缺：${d.missingBasicItems.join('、')}`);
+  if (d.gapBasicHours > 0) gaps.push(`基礎課程還差 ${d.gapBasicHours} 點`);
+  if (d.gapAdvancedHours > 0) gaps.push(`進階課程還差 ${d.gapAdvancedHours} 點`);
+  if (!gaps.length && d.gapTotal > 0) gaps.push(`教學能力提升還差 ${d.gapTotal} 點`);
+  if (!certTrack && d.gapTeaching > 0 && d.gapTotal > d.gapTeaching) gaps.push(`其中教學能力提升至少還要 ${d.gapTeaching} 點`);
+  if (certTrack && d.trackType === 'initial' && !d.seniorityMet) gaps.push(`年資未達 ${d.requiredSeniority} 年（目前 ${d.seniority} 年），可先修課`);
+  const regd = new Set((myRegs || []).map(r => r.course_id));
+  const useful = (upcoming || []).filter(c => ['基礎課程', '進階課程', '教學能力提升'].includes(c.main_category)).slice(0, 3);
+  const deadline = cert ? `請在認證效期 ${cert.valid_end_roc} 前完成。` : (certTrack ? '' : '請在今年 12 月 31 日前完成。');
+  const who = own ? '您' : '這位同仁';
+  let nextBody;
+  if (pending) nextBody = `<p>${who}的認證申請正在審核中，暫時不需要其他動作。</p>`;
+  else if (eligible) nextBody = `<p><b>${who}已符合資格。</b>${own ? '可以直接在上方按「申請臨床教師認證」，由師培中心審查。' : '可以在上方按「代為提報」，或請同仁自行申請。'}</p>`;
+  else if (!gaps.length) nextBody = `<p>目前不需要補修。${cert ? `認證效期至 ${esc(cert.valid_end_roc)}。` : ''}</p>`;
+  else nextBody = `<ul class="recs">${gaps.map(g => `<li>${esc(g)}</li>`).join('')}</ul><p>${deadline}</p>
+    ${useful.length ? `<div class="group-label">近期可報名、會計入教學能力提升的課程</div>
+      ${useful.map(c => `<div class="next-course"><div><b>${esc(c.title)}</b><br><small>${esc(c.course_date)} ${esc((c.start_time || '').slice(0, 5))}｜${Number(c.hours)} 點${(c.sub_categories || []).length ? '｜' + esc(c.sub_categories.join('、')) : ''}</small></div>
+        ${own ? (regd.has(c.id) ? '<span class="pill expiring">已報名</span>' : `<button class="btn btn-primary" style="width:auto" type="button" onclick="act('course.register',{course_id:'${esc(c.id)}'},()=>renderPerson('${esc(empId)}'))">報名</button>`) : ''}</div>`).join('')}`
+      : `<p class="hint">目前沒有開放報名的教學能力提升課程；有新課程時會出現在「課程」頁。</p>`}`;
+  const next = `<section class="card next"><h3>下一步</h3>${nextBody}</section>`;
 
   const meters = `
     <section class="card"><h3>進度（${esc(d.window?.label || '')}）　<button class="btn-link" type="button" onclick="$('recSection').scrollIntoView({behavior:'smooth'})">看是哪些課 ↓</button></h3><div class="meters">
@@ -329,7 +386,7 @@ async function renderPerson(empId, back) {
     grace: d.renewal && d.renewal.inGrace, wy: d.window && d.window.years, wl: d.window && d.window.label };
   const recs = `<section class="card" id="recSection"><h3>修課紀錄（日期、課程名稱、時數）</h3>${recordsTable(records, info)}</section>`;
 
-  $('content').innerHTML = hero + meters + preview + years + items + appList + recs;
+  $('content').innerHTML = hero + next + meters + preview + years + items + appList + recs;
   if ($('applyForm')) $('applyForm').onsubmit = e => {
     e.preventDefault();
     act('cert.apply', { emp_id: empId, service_years: $('apYears').value, external_hours: $('apExt').value, memo: $('apMemo').value },
@@ -359,10 +416,10 @@ async function renderList() {
   const count = c => list.filter(r => r.status_code === c).length;
   const kpis = isAdmin() ? '' : `
     <section class="kpis">
-      <div class="kpi"><b class="num">${list.length}</b><span>所屬人員</span></div>
-      <div class="kpi" style="--tone:var(--success)"><b class="num">${count('valid')}</b><span>認證有效／年度達標</span></div>
-      <div class="kpi" style="--tone:var(--secondary)"><b class="num">${list.filter(r => r.can_apply).length}</b><span>可提報認證</span></div>
-      <div class="kpi" style="--tone:var(--warning)"><b class="num">${count('expiring') + count('remedy')}</b><span>今年到期尚未符合</span></div>
+      <button type="button" class="kpi" onclick="pickStatus('')"><b class="num">${list.length}</b><span>所屬人員</span></button>
+      <button type="button" class="kpi" style="--tone:var(--success)" onclick="pickStatus('valid')"><b class="num">${count('valid')}</b><span>認證有效／年度達標</span></button>
+      <button type="button" class="kpi" style="--tone:var(--secondary)" onclick="pickStatus('can')"><b class="num">${list.filter(r => r.can_apply).length}</b><span>可提報認證 ›</span></button>
+      <button type="button" class="kpi" style="--tone:var(--warning)" onclick="pickStatus('expiring')"><b class="num">${count('expiring') + count('remedy')}</b><span>即將到期、點數尚缺 ›</span></button>
     </section>
     <section class="card"><h3>各職類認證分佈</h3>${LEGEND}${distRows(list)}</section>`;
   $('content').innerHTML = kpis + `
@@ -370,6 +427,7 @@ async function renderList() {
       <div class="filters">
         <input id="fQ" type="search" placeholder="工號或單位">
         <select id="fS"><option value="">所有狀態</option><option value="can">可提報認證</option><option value="expiring">今年到期尚未符合</option><option value="valid">有效／達標</option><option value="deficient">尚未符合</option>${state.regime === 'legacy' ? '<option value="newgap">新制試算不符合</option>' : ''}</select>
+        ${nameBtn()}
         <span id="fN" class="hint" style="align-self:center;margin:0"></span>
       </div>
       <div class="table-wrap"><table><thead><tr><th>工號</th><th>單位</th><th>職稱</th><th>職類</th><th>教學點數</th><th>狀態</th><th>說明</th><th>${state.regime === 'legacy' ? '新制試算' : ''}</th></tr></thead><tbody id="tb"></tbody></table></div>
@@ -385,7 +443,7 @@ async function renderList() {
     rows = [...rows].sort((a, b) => (ORDER[a.status_code] ?? 9) - (ORDER[b.status_code] ?? 9));
     $('fN').textContent = `${rows.length} / ${list.length} 人${rows.length > 300 ? '（顯示前 300 筆，請用搜尋縮小範圍）' : ''}`;
     $('tb').innerHTML = rows.slice(0, 300).map(r => `<tr>
-      <td><button class="btn-link" type="button" onclick="go('person','${esc(r.emp_id)}')">${esc(r.emp_id)}</button>${r.on_plan ? ' <span class="pill eligible" title="列入本年度追蹤名單">追蹤</span>' : ''}</td>
+      <td><button class="btn-link" type="button" onclick="go('person','${esc(r.emp_id)}')">${empLabel(r.emp_id)}</button>${r.on_plan ? ' <span class="pill eligible" title="列入本年度追蹤名單">追蹤</span>' : ''}</td>
       <td>${esc(r.dept)}</td><td>${esc(r.staff?.title || '')}</td><td>${esc(profGroup(r))}</td>
       <td class="num"><button class="btn-link" type="button" title="查看修課紀錄" onclick="showRecords('${esc(r.emp_id)}')">${esc(r.teach)}</button> / ${esc(r.need)}</td>
       <td><span class="pill ${esc(r.status_code)}">${esc(r.status)}</span>${r.valid_end ? `<br><small>至 ${esc(r.valid_end)}</small>` : ''}</td>
@@ -395,6 +453,8 @@ async function renderList() {
   };
   $('fQ').oninput = draw; $('fS').onchange = draw; draw();
 }
+
+function pickStatus(v) { $('fS').value = v; $('fS').onchange(); $('fS').scrollIntoView({ behavior: 'smooth', block: 'center' }); }
 
 async function renderOverview() {
   const list = await loadList();
@@ -489,7 +549,7 @@ async function renderExpiry() {
   const cutoff = state.rules.batch_cutoff || null;  // 批次基準日（例如 9/30）
   const rocDate = d => `${Number(d.slice(0, 4)) - 1911}/${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
   let mode = (state.exp && state.exp.mode) || (canCompare ? 'legacy' : 'actual');
-  if (mode === 'cutoff' && !cutoff) mode = canCompare ? 'legacy' : 'actual';
+  if (mode === 'cutoff' && (!cutoff || !isAdmin())) mode = canCompare ? 'legacy' : 'actual';
   if (!canCompare && mode !== 'cutoff') mode = 'actual';
   const base = await loadList();
   const alt = mode === 'new' || mode === 'both' ? await loadNewRegimeList() : null;
@@ -507,7 +567,7 @@ async function renderExpiry() {
   });
   const keys = [...buckets.keys()].sort();
   const modes = [...(canCompare ? [['legacy', '舊制（目前適用）'], ['new', '新制試算'], ['both', '新舊並排比較']] : [['actual', '目前']]),
-    ...(cutoff ? [['cutoff', `基準日 ${rocDate(cutoff)} 批次`]] : [])];
+    ...(cutoff && isAdmin() ? [['cutoff', `基準日 ${rocDate(cutoff)} 批次`]] : [])];
   const modeNote = {
     both: '每一列上方的長條是舊制、下方是新制；名單會標出「舊制已達標、新制尚未符合」的人，這些人需要在改制前補修。',
     new: '以同一份修課紀錄改用新制計算的結果，僅供試算，不影響目前實際適用的制度；提報名單請回到「舊制」或「基準日批次」檢視匯出。',
@@ -597,6 +657,7 @@ async function renderExpiry() {
         ${canPick.length ? `<button class="btn btn-ghost" type="button" id="pickAll">全選可提報（${canPick.length}）</button>
           <button class="btn btn-primary" style="width:auto" type="button" id="pecBtn">下載勾選者的醫策會上傳檔</button>` : ''}
         <button class="btn btn-ghost" type="button" id="listBtn">匯出此名單</button>
+        ${nameBtn()}
         <span class="hint" id="pickN" style="align-self:center;margin:0"></span>
       </div>
 
@@ -604,7 +665,7 @@ async function renderExpiry() {
         ${other ? '<th>舊制點數</th><th>舊制</th><th>新制（基礎／進階）</th><th>新制</th>' : `<th>教學點數</th><th>缺口</th><th>狀態</th>${exportable ? '<th>提報效期</th>' : ''}`}</tr></thead><tbody>
       ${rows.slice(0, 500).map(r => { const o = other && other.get(r.emp_id); return `<tr class="${drop(r) ? 'row-drop' : ''}">
         <td>${canPick.length && r.can_apply ? `<input type="checkbox" class="pick" value="${esc(r.emp_id)}" ${ex.picked.has(r.emp_id) ? 'checked' : ''} aria-label="選取 ${esc(r.emp_id)}">` : ''}</td>
-        <td><button class="btn-link" type="button" onclick="go('person','${esc(r.emp_id)}')">${esc(r.emp_id)}</button></td>
+        <td><button class="btn-link" type="button" onclick="go('person','${esc(r.emp_id)}')">${empLabel(r.emp_id)}</button></td>
         <td>${esc(r.dept)}</td><td>${esc(r.staff?.title || '')}</td><td>${esc(profGroup(r))}</td><td>${esc(r.valid_end || '—')}</td>
         ${other ? `<td class="num"><button class="btn-link" type="button" title="查看修課紀錄" onclick="showRecords('${esc(r.emp_id)}')">${esc(r.teach)}</button> / ${esc(r.need)}</td><td>${gap(r)}</td>
             <td class="num">${o ? `<b>${esc(o.basic)}</b>／<b>${esc(o.adv)}</b>` : '—'}</td><td>${gap(o)}</td>`
@@ -736,7 +797,7 @@ async function renderReview() {
   const { data: apps, error } = await sb.from('applications').select('*, staff!applications_emp_id_fkey(dept,title,profession)').order('submitted_at', { ascending: false }).limit(200);
   if (error) throw error;
   const row = a => `<tr>
-    <td><button class="btn-link" type="button" onclick="go('person','${esc(a.emp_id)}')">${esc(a.emp_id)}</button><br><small>${esc(a.staff?.dept || '')}</small></td>
+    <td><button class="btn-link" type="button" onclick="go('person','${esc(a.emp_id)}')">${empLabel(a.emp_id)}</button><br><small>${esc(a.staff?.dept || '')}</small></td>
     <td>${esc(a.app_type)}<br><small>${esc(fmtTime(a.submitted_at))}${a.submitted_by && a.submitted_by !== a.emp_id ? `<br>由 ${esc(a.submitted_by)} 提報` : ''}</small></td>
     <td class="reason"><span class="pill ${a.auto_check?.eligible ? 'valid' : 'expired'}">系統檢核${a.auto_check?.eligible ? '符合' : '未符合'}</span>
       ${esc(a.auto_check?.reason || '')}<br>教學 ${esc(a.auto_check?.teaching)}・基礎 ${esc(a.auto_check?.basic)}・進階 ${esc(a.auto_check?.advanced)}（${esc(a.auto_check?.window || '')}）
@@ -780,7 +841,7 @@ async function renderRoster() {
       <div class="note">認證率的分母以各職類年度訓練計畫所列人員為準；離職、留停、職務異動者改狀態即可，不必刪除，會另行列示。</div></section>
     <section class="card"><h3>${year} 年度追蹤名單（${rows.length} 人）</h3><div class="table-wrap"><table>
       <thead><tr><th>工號</th><th>單位</th><th>職類</th><th>類別</th><th>列管狀態</th><th>目前認證狀態</th><th>備註</th><th></th></tr></thead><tbody>
-      ${rows.map(r => `<tr><td><button class="btn-link" type="button" onclick="go('person','${esc(r.emp_id)}')">${esc(r.emp_id)}</button></td>
+      ${rows.map(r => `<tr><td><button class="btn-link" type="button" onclick="go('person','${esc(r.emp_id)}')">${empLabel(r.emp_id)}</button></td>
         <td>${esc(r.staff?.dept || '')}</td><td>${esc(r.staff?.profession || '')}</td><td>${esc(r.monitor_type || '')}</td>
         <td><span class="pill ${r.status === '在職列管' ? 'valid' : ''}">${esc(r.status)}</span></td>
         <td class="reason">${esc(st.get(r.emp_id)?.status || '')}</td><td class="reason">${esc(r.notes || '')}</td>

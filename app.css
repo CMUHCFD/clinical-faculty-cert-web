@@ -211,3 +211,14 @@ dialog#recDlg::backdrop { background: rgba(22,70,97,.45); }
 tr.row-hit td { background: #EDF8F6; }
 tr.row-off td { color: var(--muted); }
 .num .btn-link { font-size: 15px; }
+
+/* 下一步、姓名對照、密碼視窗 */
+.next { border-left: 8px solid var(--secondary); }
+.next p { margin: 6px 0; }
+.next-course { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid var(--line); }
+.nm { color: var(--text); font-weight: 400; text-decoration: none; margin-left: 4px; }
+button.kpi { text-align: left; border: 0; border-top: 4px solid var(--tone, var(--primary)); cursor: pointer; font: inherit; }
+button.kpi:hover { background: var(--primary-light); }
+dialog.small-dlg { width: min(380px, 94vw); border: 0; border-radius: 14px; padding: 0; box-shadow: 0 20px 60px rgba(22,70,97,.35); }
+dialog.small-dlg::backdrop { background: rgba(22,70,97,.45); }
+@media (max-width: 640px) { .who .btn-ghost { padding: 5px 8px; font-size: 12.5px; } }
