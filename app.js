@@ -97,12 +97,13 @@ function regimeOf(rules) {
   return { active: forced || cfg.transition_mode === 'new' ? 'new' : 'legacy', forced, newFromYear: cfg.new_from_year || 2027 };
 }
 const D = () => (state.regime === 'new' ? 'detail_new' : 'detail');   // 依目前適用制度讀對應的計算結果
-const listCols = () => `emp_id,dept,computed_at,status_code:${D()}->>statusCode,status:${D()}->>status,track_type:${D()}->>trackType,` +
-  `ie:${D()}->>initialEligible,rc:${D()}->>renewalCompliant,reason:${D()}->>statusReason,teach:${D()}->>teachingHours,` +
-  `need:${D()}->>requiredTotalHours,expiring:${D()}->>expiringSoon,valid_end:${D()}->activeCertificate->>valid_end_roc,on_plan,` +
-  `ve:${D()}->activeCertificate->>valid_end,basic:${D()}->>basicHours,adv:${D()}->>advancedHours,gap_t:${D()}->>gapTotal,` +
-  `gap_b:${D()}->>gapBasicHours,gap_a:${D()}->>gapAdvancedHours,cp:${D()}->>compliant,grace:${D()}->renewal->>inGrace,` +
+const colsFor = d => `emp_id,dept,computed_at,status_code:${d}->>statusCode,status:${d}->>status,track_type:${d}->>trackType,` +
+  `ie:${d}->>initialEligible,rc:${d}->>renewalCompliant,reason:${d}->>statusReason,teach:${d}->>teachingHours,` +
+  `need:${d}->>requiredTotalHours,expiring:${d}->>expiringSoon,valid_end:${d}->activeCertificate->>valid_end_roc,on_plan,` +
+  `ve:${d}->activeCertificate->>valid_end,basic:${d}->>basicHours,adv:${d}->>advancedHours,gap_t:${d}->>gapTotal,` +
+  `gap_b:${d}->>gapBasicHours,gap_a:${d}->>gapAdvancedHours,cp:${d}->>compliant,grace:${d}->renewal->>inGrace,` +
   `new_ok:detail->newRulePreview->>wouldQualify,new_reason:detail->newRulePreview->>statusReason,staff(title,profession)`;
+const listCols = () => colsFor(D());
 // 職類分組：護理依所屬單位再分為「護理部」與「非護理部」
 const profGroup = r => {
   const p = r.staff?.profession || '其他';
@@ -122,6 +123,17 @@ async function loadList(force) {
   }
   if (state.list[0]) $('asOf').textContent = fmtTime(state.list[0].computed_at);
   return state.list;
+}
+
+// 另一套制度的名單（只供「到期與提報」的比較檢視使用；不改變全院實際適用的制度）
+async function loadNewRegimeList() {
+  const base = await loadList();
+  if (state.altFor !== base) {
+    const rows = await fetchAll(() => sb.from('cert_status').select(colsFor('detail_new')).order('emp_id'));
+    rows.forEach(r => { r.can_apply = r.ie === 'true' || r.rc === 'true'; r.new_ok = null; });
+    state.alt = rows; state.altFor = base;
+  }
+  return state.alt;
 }
 
 async function boot() {
@@ -376,8 +388,13 @@ function certPeriod(r) {
 }
 
 async function renderExpiry() {
-  const list = await loadList();
-  const ready = r => r.can_apply || r.cp === 'true';
+  const canCompare = state.regime === 'legacy';     // 全院已採新制時，兩套結果相同，不需比較
+  const mode = canCompare ? ((state.exp && state.exp.mode) || 'legacy') : 'actual';
+  const base = await loadList();
+  const alt = mode === 'new' || mode === 'both' ? await loadNewRegimeList() : null;
+  const list = mode === 'new' ? alt : base;
+  const other = mode === 'both' ? new Map(alt.map(r => [r.emp_id, r])) : null;
+  const ready = r => !!r && (r.can_apply || r.cp === 'true');
   const buckets = new Map();
   const put = (key, label, hint, r) => { if (!buckets.has(key)) buckets.set(key, { key, label, hint, rows: [] }); buckets.get(key).rows.push(r); };
   list.forEach(r => {
@@ -386,55 +403,74 @@ async function renderExpiry() {
     else if (r.track_type === 'initial' && r.can_apply) put('~initial', '初次認證可提報', '尚無認證、已符合資格', r);
   });
   const keys = [...buckets.keys()].sort();
-  if (!keys.length) { $('content').innerHTML = '<div class="card empty">目前沒有即將到期或可提報的人員。</div>'; return; }
-  const ex = state.exp = state.exp && buckets.has(state.exp.bucket) ? state.exp : { bucket: keys[0], group: '', picked: new Set() };
+  const modeBar = !canCompare ? '' : `
+    <section class="card"><h3>檢視方式</h3><div class="seg" role="tablist">
+      ${[['legacy', '舊制（目前適用）'], ['new', '新制試算'], ['both', '新舊並排比較']].map(([m, t]) => `<button type="button" role="tab" class="${mode === m ? 'is-active' : ''}" onclick="state.exp={mode:'${m}',bucket:state.exp&&state.exp.bucket,group:'',picked:new Set()};renderExpiry()">${t}</button>`).join('')}
+    </div><div class="note">${mode === 'both' ? '每一列上方的長條是舊制、下方是新制；名單會標出「舊制已達標、新制尚未符合」的人，這些人需要在改制前補修。'
+      : mode === 'new' ? '以同一份修課紀錄改用新制計算的結果，僅供試算，不影響目前實際適用的制度；提報名單請回到「舊制」檢視匯出。'
+      : '目前實際適用的制度。'}</div></section>`;
+  if (!keys.length) { $('content').innerHTML = modeBar + '<div class="card empty">目前沒有即將到期或可提報的人員。</div>'; return; }
+  const prev = state.exp || {};
+  const ex = state.exp = { mode, bucket: buckets.has(prev.bucket) ? prev.bucket : keys[0], group: prev.group || '', picked: prev.picked || new Set() };
   const max = Math.max(...keys.map(k => buckets.get(k).rows.length));
+  const okNew = rows => rows.filter(r => ready(other.get(r.emp_id))).length;
+  const bar = (n, ok, cls = '') => `<span class="bar ${cls}" style="width:${Math.max(6, n / max * 100)}%"><i style="width:${ok / n * 100}%;background:var(--success)"></i><i style="width:${(n - ok) / n * 100}%;background:var(--warning)"></i></span>`;
 
   const timeRows = keys.map(k => {
-    const b = buckets.get(k), ok = b.rows.filter(ready).length;
-    return `<button type="button" class="drill ${ex.bucket === k ? 'is-active' : ''}" onclick="state.exp={bucket:'${k}',group:'',picked:new Set()};renderExpiry()">
+    const b = buckets.get(k), n = b.rows.length, ok = b.rows.filter(ready).length;
+    return `<button type="button" class="drill ${ex.bucket === k ? 'is-active' : ''}" onclick="state.exp.bucket='${k}';state.exp.group='';state.exp.picked=new Set();renderExpiry()">
       <span class="drill-label"><b>${esc(b.label)}</b><small>${esc(b.hint)}</small></span>
-      <span class="bar" style="width:${Math.max(6, b.rows.length / max * 100)}%"><i style="width:${ok / b.rows.length * 100}%;background:var(--success)"></i><i style="width:${(b.rows.length - ok) / b.rows.length * 100}%;background:var(--warning)"></i></span>
-      <span class="drill-num num"><b>${b.rows.length}</b> 人・已達標 <b>${ok}</b>・尚缺 <b>${b.rows.length - ok}</b></span></button>`;
+      <span class="bars">${bar(n, ok)}${other ? bar(n, okNew(b.rows), 'thin') : ''}</span>
+      <span class="drill-num num"><b>${n}</b> 人・${other ? `舊制達標 <b>${ok}</b>・新制達標 <b>${okNew(b.rows)}</b>` : `已達標 <b>${ok}</b>・尚缺 <b>${n - ok}</b>`}</span></button>`;
   }).join('');
 
   const cur = buckets.get(ex.bucket);
   const groups = {};
-  cur.rows.forEach(r => { const g = profGroup(r); groups[g] = groups[g] || { n: 0, ok: 0 }; groups[g].n++; if (ready(r)) groups[g].ok++; });
-  const chips = [['', '全部職類', cur.rows.length, cur.rows.filter(ready).length], ...Object.entries(groups).sort((a, b) => b[1].n - a[1].n).map(([g, v]) => [g, g, v.n, v.ok])]
-    .map(([g, label, n, ok]) => `<button type="button" class="chip ${ex.group === g ? 'is-active' : ''}" onclick="state.exp.group='${esc(g)}';state.exp.picked=new Set();renderExpiry()">
-      <b>${esc(label)}</b><span class="num">${ok} / ${n} 已達標</span><span class="bar"><i style="width:${n ? ok / n * 100 : 0}%;background:var(--success)"></i></span></button>`).join('');
+  cur.rows.forEach(r => { const g = profGroup(r); groups[g] = groups[g] || []; groups[g].push(r); });
+  const chips = [['', '全部職類', cur.rows], ...Object.entries(groups).sort((a, b) => b[1].length - a[1].length).map(([g, v]) => [g, g, v])]
+    .map(([g, label, v]) => { const n = v.length, ok = v.filter(ready).length; return `<button type="button" class="chip ${ex.group === g ? 'is-active' : ''}" onclick="state.exp.group='${esc(g)}';state.exp.picked=new Set();renderExpiry()">
+      <b>${esc(label)}</b><span class="num">${other ? `舊 ${ok}・新 ${okNew(v)}／${n} 人` : `${ok} / ${n} 已達標`}</span>
+      <span class="bar"><i style="width:${n ? ok / n * 100 : 0}%;background:var(--success)"></i></span>
+      ${other ? `<span class="bar"><i style="width:${n ? okNew(v) / n * 100 : 0}%;background:var(--secondary)"></i></span>` : ''}</button>`; }).join('');
 
-  const rows = cur.rows.filter(r => !ex.group || profGroup(r) === ex.group).sort((a, b) => Number(ready(a)) - Number(ready(b)) || a.emp_id.localeCompare(b.emp_id));
-  const canPick = rows.filter(r => r.can_apply);
+  const drop = r => other && ready(r) && !ready(other.get(r.emp_id));      // 舊制達標、新制不符
+  const rows = cur.rows.filter(r => !ex.group || profGroup(r) === ex.group)
+    .sort((a, b) => Number(drop(b)) - Number(drop(a)) || Number(ready(a)) - Number(ready(b)) || a.emp_id.localeCompare(b.emp_id));
+  const exportable = isAdmin() && mode !== 'new';
+  const canPick = exportable ? rows.filter(r => r.can_apply) : [];
   const gap = r => {
+    if (!r) return '—';
     const p = [];
     if (Number(r.gap_t) > 0) p.push(`總點數 −${r.gap_t}`);
     if (Number(r.gap_b) > 0) p.push(`基礎 −${r.gap_b}`);
     if (Number(r.gap_a) > 0) p.push(`進階 −${r.gap_a}`);
     return p.length ? `<span class="gap" title="${esc(r.reason)}">${p.join('・')}</span>` : '<span class="done">已達標</span>';
   };
-  $('content').innerHTML = `
+  const dropCount = other ? rows.filter(drop).length : 0;
+  $('content').innerHTML = modeBar + `
     <section class="card"><h3><span class="step">1</span> 選擇時間　<small class="hint" style="display:inline">長條越長人數越多；綠色為已達標，黃色為尚缺點數</small></h3><div class="drills">${timeRows}</div></section>
     <section class="card"><h3><span class="step">2</span> ${esc(cur.label)}：選擇職類</h3><div class="chips">${chips}</div></section>
     <section class="card"><h3><span class="step">3</span> 名單（${rows.length} 人${ex.group ? '｜' + esc(ex.group) : ''}）</h3>
+      ${other ? `<div class="attention">其中 <b>${dropCount}</b> 人在舊制已達標、改採新制後尚未符合，已排在最前面。</div>` : ''}
       <div class="filters">
-        ${isAdmin() && canPick.length ? `<button class="btn btn-ghost" type="button" id="pickAll">全選可提報（${canPick.length}）</button>
+        ${canPick.length ? `<button class="btn btn-ghost" type="button" id="pickAll">全選可提報（${canPick.length}）</button>
           <button class="btn btn-primary" style="width:auto" type="button" id="pecBtn">匯出醫策會提報名單</button>` : ''}
         <button class="btn btn-ghost" type="button" id="listBtn">匯出此名單</button>
         <span class="hint" id="pickN" style="align-self:center;margin:0"></span>
       </div>
-      ${isAdmin() && canPick.length ? '<div class="note">提報名單只含工號。下載後在您的電腦執行 <code style="letter-spacing:0">node tools/pec-export.js</code>，會在本機補上姓名與身分證字號，產生醫策會 PEC 平台的上傳檔。</div>' : ''}
-      <div class="table-wrap"><table><thead><tr><th></th><th>工號</th><th>單位</th><th>職稱</th><th>職類</th><th>效期迄日</th><th>教學點數</th><th>缺口</th><th>狀態</th><th>提報效期</th>${state.regime === 'legacy' ? '<th>新制試算</th>' : ''}</tr></thead><tbody>
-      ${rows.slice(0, 500).map(r => `<tr>
-        <td>${isAdmin() && r.can_apply ? `<input type="checkbox" class="pick" value="${esc(r.emp_id)}" ${ex.picked.has(r.emp_id) ? 'checked' : ''} aria-label="選取 ${esc(r.emp_id)}">` : ''}</td>
+      ${canPick.length ? '<div class="note">提報名單只含工號。下載後在您的電腦執行 <code style="letter-spacing:0">node tools/pec-export.js</code>，會在本機補上姓名與身分證字號，產生醫策會 PEC 平台的上傳檔。</div>' : ''}
+      <div class="table-wrap"><table><thead><tr><th></th><th>工號</th><th>單位</th><th>職稱</th><th>職類</th><th>效期迄日</th>
+        ${other ? '<th>舊制點數</th><th>舊制</th><th>新制（基礎／進階）</th><th>新制</th>' : `<th>教學點數</th><th>缺口</th><th>狀態</th>${exportable ? '<th>提報效期</th>' : ''}`}</tr></thead><tbody>
+      ${rows.slice(0, 500).map(r => { const o = other && other.get(r.emp_id); return `<tr class="${drop(r) ? 'row-drop' : ''}">
+        <td>${canPick.length && r.can_apply ? `<input type="checkbox" class="pick" value="${esc(r.emp_id)}" ${ex.picked.has(r.emp_id) ? 'checked' : ''} aria-label="選取 ${esc(r.emp_id)}">` : ''}</td>
         <td><button class="btn-link" type="button" onclick="go('person','${esc(r.emp_id)}')">${esc(r.emp_id)}</button></td>
         <td>${esc(r.dept)}</td><td>${esc(r.staff?.title || '')}</td><td>${esc(profGroup(r))}</td><td>${esc(r.valid_end || '—')}</td>
-        <td class="num"><b>${esc(r.teach)}</b> / ${esc(r.need)}</td><td>${gap(r)}</td>
-        <td><span class="pill ${esc(r.status_code)}">${esc(r.status)}</span></td>
-        <td class="num">${r.can_apply ? (p => `${p.start}–${p.end}`)(certPeriod(r)) : ''}</td>
-        ${state.regime === 'legacy' ? `<td>${r.new_ok === 'true' ? '<span class="pill valid">符合</span>' : r.new_ok === 'false' ? `<span class="pill expiring" title="${esc(r.new_reason)}">尚未符合</span>` : ''}</td>` : ''}
-      </tr>`).join('')}</tbody></table></div>
+        ${other ? `<td class="num"><b>${esc(r.teach)}</b> / ${esc(r.need)}</td><td>${gap(r)}</td>
+            <td class="num">${o ? `<b>${esc(o.basic)}</b>／<b>${esc(o.adv)}</b>` : '—'}</td><td>${gap(o)}</td>`
+          : `<td class="num"><b>${esc(r.teach)}</b> / ${esc(r.need)}</td><td>${gap(r)}</td>
+            <td><span class="pill ${esc(r.status_code)}">${esc(r.status)}</span></td>
+            ${exportable ? `<td class="num">${r.can_apply ? (p => `${p.start}–${p.end}`)(certPeriod(r)) : ''}</td>` : ''}`}
+      </tr>`; }).join('')}</tbody></table></div>
       ${rows.length > 500 ? '<div class="note">畫面只列前 500 人，請先選職類縮小範圍；匯出則包含全部。</div>' : ''}
     </section>`;
 
@@ -448,8 +484,11 @@ async function renderExpiry() {
       ...sel.map(r => { const p = certPeriod(r); return [r.emp_id, PEC_NAME[r.staff?.profession] || r.staff?.profession, r.track_type === 'initial' ? '新增' : '展延', p.start, p.end]; })]);
     toast(`已下載 ${sel.length} 人的提報名單`);
   };
-  $('listBtn').onclick = () => download(`${cur.label}_${today().replace(/-/g, '')}.csv`, [['工號', '單位', '職稱', '職類', '效期迄日', '教學點數', '應達點數', '尚缺', '狀態', '說明'],
-    ...rows.map(r => [r.emp_id, r.dept, r.staff?.title, profGroup(r), r.valid_end, r.teach, r.need, r.gap_t, r.status, r.reason])]);
+  $('listBtn').onclick = () => download(`${cur.label}_${mode === 'both' ? '新舊比較' : mode === 'new' ? '新制試算' : '名單'}_${today().replace(/-/g, '')}.csv`,
+    other ? [['工號', '單位', '職稱', '職類', '效期迄日', '舊制教學點數', '舊制應達', '舊制狀態', '新制基礎', '新制進階', '新制狀態', '新制說明', '舊制達標但新制不符'],
+        ...rows.map(r => { const o = other.get(r.emp_id) || {}; return [r.emp_id, r.dept, r.staff?.title, profGroup(r), r.valid_end, r.teach, r.need, r.status, o.basic, o.adv, o.status, o.reason, drop(r) ? '是' : '']; })]
+      : [['工號', '單位', '職稱', '職類', '效期迄日', '教學點數', '應達點數', '尚缺', '狀態', '說明'],
+        ...rows.map(r => [r.emp_id, r.dept, r.staff?.title, profGroup(r), r.valid_end, r.teach, r.need, r.gap_t, r.status, r.reason])]);
   sync();
 }
 
