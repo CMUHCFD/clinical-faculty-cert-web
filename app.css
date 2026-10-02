@@ -197,3 +197,6 @@ td input[type=checkbox] { width: 18px; height: 18px; }
 .drill .bar.thin i:last-child { background: var(--butter) !important; }
 .attention { margin-bottom: 10px; padding: 8px 12px; background: #FFFBE6; border-left: 4px solid var(--warning); border-radius: 6px; font-size: 13.5px; }
 tr.row-drop td { background: #FFFBE6; }
+
+.batch { border-top: 5px solid var(--primary); }
+.batch select { padding: 8px 10px; border: 1.5px solid var(--line); border-radius: 8px; background: #fff; font-size: 15px; }

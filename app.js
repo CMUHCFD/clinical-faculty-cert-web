@@ -381,16 +381,62 @@ function certPeriod(r, ref) {
   const renewing = r.ve && r.ve >= t;
   let start, end;
   if (state.regime === 'legacy') {
+    // 次月 1 日起整兩年，迄日為期滿月份的最後一天（與醫策會既有核予方式一致）
     const years = (state.rules.legacy || {}).cert_validity_years || 2;
-    if (renewing) { const d = new Date(`${r.ve}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + 1); start = d.toISOString().slice(0, 10); }
-    else { const y = Number(t.slice(0, 4)), m = Number(t.slice(5, 7)); start = m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, '0')}-01`; }
-    end = `${Number(start.slice(0, 4)) + years - 1}-12-31`;
+    const from = renewing ? r.ve : t;
+    const idx = Number(from.slice(0, 4)) * 12 + Number(from.slice(5, 7));
+    const ym = i => [Math.floor(i / 12), (i % 12) + 1], pad = n => String(n).padStart(2, '0');
+    const [sy, sm] = ym(idx), [ey, em] = ym(idx + years * 12 - 1);
+    start = `${sy}-${pad(sm)}-01`; end = `${ey}-${pad(em)}-${pad(new Date(ey, em, 0).getDate())}`;
   } else {
     const years = (state.rules.general || {}).cert_validity_years || 4;
     const sy = (renewing ? Number(r.ve.slice(0, 4)) : Number(t.slice(0, 4))) + 1;
     start = `${sy}-01-01`; end = `${sy + years - 1}-12-31`;
   }
   return { start: roc(start), end: roc(end) };
+}
+
+// ---------- 在瀏覽器內讀取本機名冊（不上傳），用來產生含姓名與身分證字號的醫策會上傳檔 ----------
+function loadScript(src) {
+  return new Promise((ok, bad) => { if (window.XLSX) return ok(); const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = () => bad(new Error('無法載入試算表元件')); document.head.appendChild(s); });
+}
+async function pickRoster() {
+  if (state.roster) return state.roster;
+  await loadScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');
+  const file = await new Promise(resolve => {
+    const input = document.createElement('input'); input.type = 'file'; input.accept = '.xlsx,.xls';
+    input.onchange = () => resolve(input.files[0] || null); input.click();
+  });
+  if (!file) throw new Error('未選擇名冊檔');
+  const wb = XLSX.read(await file.arrayBuffer());
+  const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' });
+  const H = rows[0].map(h => String(h).trim()), col = p => H.findIndex(h => h.startsWith(p));
+  const c = { emp: col('帳號'), name: col('中文姓名'), id: col('身分證'), dept: H.indexOf('單位'), title: col('職稱') };
+  if (c.emp === -1 || c.name === -1 || c.id === -1) throw new Error('這不是員工名冊：找不到「帳號／中文姓名／身分證」欄位');
+  state.roster = new Map(rows.slice(1).filter(r => r[c.emp]).map(r => [String(r[c.emp]).trim().toLowerCase(),
+    { name: String(r[c.name]).split(':')[0].trim(), id: String(r[c.id]).trim(), dept: String(r[c.dept] || '').trim(), title: String(r[c.title] || '').replace(/:\d+$/, '').trim() }]));
+  toast(`已讀取名冊 ${state.roster.size} 人（只在這個瀏覽器分頁內使用，不會上傳；關閉分頁即清除）`);
+  return state.roster;
+}
+async function downloadPec(rows, ref, label, kindOf) {
+  try {
+    const roster = await pickRoster();
+    const general = state.rules.general || {};
+    const upload = [], review = [], missing = [];
+    rows.forEach(r => {
+      const who = roster.get(r.emp_id.toLowerCase()), p = certPeriod(r, ref), prof = PEC_NAME[r.staff?.profession] || r.staff?.profession;
+      if (!who || !/^[A-Z][0-9A-Z]\d{8}$/.test(who.id)) return missing.push(r.emp_id);
+      upload.push({ '姓名': who.name, '身分證字號': who.id, '職類': prof, '教師認證效期起日': p.start, '教師認證效期迄日': p.end, '取得認證機構代碼': general.pec_org_code || '157', '取得認證機構名稱': general.pec_org_name || '中國醫藥大學附設醫院' });
+      review.push({ '工號': r.emp_id, '姓名': who.name, '單位': r.dept, '職稱': r.staff?.title || '', '職類': prof, '申請別': kindOf(r), '教學能力提升點數': r.teach, '應達點數': r.need, '原效期迄日': r.valid_end || '', '提報效期起日': p.start, '提報效期迄日': p.end });
+    });
+    if (!upload.length) throw new Error('名冊中找不到這些人員的資料');
+    const stamp = today().replace(/-/g, '');
+    const a = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(a, XLSX.utils.json_to_sheet(upload), '工作表1');
+    XLSX.writeFile(a, `PEC上傳檔_${label}_${stamp}.xls`, { bookType: 'biff8' });
+    const b = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(b, XLSX.utils.json_to_sheet(review), '核對清冊');
+    XLSX.writeFile(b, `PEC核對清冊_${label}_${stamp}.xlsx`);
+    toast(`已下載上傳檔與核對清冊，共 ${upload.length} 人${missing.length ? `；另有 ${missing.length} 人不在名冊或證號格式不符，未納入（${missing.slice(0, 5).join('、')}${missing.length > 5 ? '…' : ''}）` : ''}`, !missing.length);
+  } catch (err) { toast(err.message, false); }
 }
 
 async function renderExpiry() {
@@ -426,7 +472,39 @@ async function renderExpiry() {
     <section class="card"><h3>檢視方式</h3><div class="seg" role="tablist">
       ${modes.map(([m, t]) => `<button type="button" role="tab" class="${mode === m ? 'is-active' : ''}" onclick="state.exp={mode:'${m}',bucket:state.exp&&state.exp.bucket,group:'',picked:new Set()};renderExpiry()">${t}</button>`).join('')}
     </div><div class="note">${modeNote}</div></section>`;
-  if (!keys.length) { $('content').innerHTML = modeBar + '<div class="card empty">目前沒有即將到期或可提報的人員。</div>'; return; }
+  // 月底批次：當月屆滿可展延＋保留期內已補足＋新增可提報
+  const batchOn = isAdmin() && mode !== 'new' && mode !== 'both';
+  const refMonth = (refDate || today()).slice(0, 7);
+  const monthKeys = [...new Set([refMonth, ...keys.filter(k => !k.startsWith('~'))])].sort();
+  const bm = state.batchMonth && monthKeys.includes(state.batchMonth) ? state.batchMonth : refMonth;
+  const kindOf = r => r.track_type === 'initial' ? '新增' : (r.grace === 'true' ? '展延（保留期內補足）' : '展延');
+  const batchRows = !batchOn ? [] : list.filter(r => r.can_apply && (r.track_type === 'initial' || r.grace === 'true' || (r.ve && r.ve.slice(0, 7) === bm)));
+  const bc = k => batchRows.filter(r => kindOf(r) === k).length;
+  const monthName = k => `${Number(k.slice(0, 4)) - 1911} 年 ${Number(k.slice(5, 7))} 月`;
+  const batchRef = `${bm}-28`;   // 效期自這個月的次月 1 日起算
+  const batchPeriod = batchRows.length ? certPeriod(batchRows.find(r => r.track_type === 'initial') || batchRows[0], batchRef) : null;
+  state.batch = { rows: batchRows, ref: batchRef, label: `${bm.replace('-', '')}月底批次`, kindOf };
+  const batchCard = !batchOn ? '' : `
+    <section class="card batch"><h3>月底批次：可上傳醫策會的名單</h3>
+      <div class="filters" style="align-items:center">
+        <label style="margin:0;font-weight:700">月份 <select id="bMonth" style="display:inline-block;width:auto;margin:0 0 0 6px">${monthKeys.map(k => `<option value="${k}" ${k === bm ? 'selected' : ''}>${monthName(k)}</option>`).join('')}</select></label>
+        <span class="num">共 <b>${batchRows.length}</b> 人：當月屆滿可展延 <b>${bc('展延')}</b>・保留期內已補足 <b>${bc('展延（保留期內補足）')}</b>・新增 <b>${bc('新增')}</b></span>
+      </div>
+      ${batchPeriod ? `<div class="note">提報效期：${batchPeriod.start}–${batchPeriod.end}（次月 1 日起整兩年）。已認證教師須在效期屆滿前 2 年內滿 8 點；新增須在 2 年內滿 10 點且年資達標。</div>` : ''}
+      <div class="filters">
+        <button class="btn btn-primary" style="width:auto" type="button" id="bPec" ${batchRows.length ? '' : 'disabled'}>下載醫策會上傳檔與核對清冊</button>
+        <button class="btn btn-ghost" type="button" id="bCsv" ${batchRows.length ? '' : 'disabled'}>下載名單（僅工號）</button>
+      </div>
+      <div class="note">上傳檔需要姓名與身分證字號：按下後請選擇您電腦上的員工名冊（user….xlsx）。名冊只在這個瀏覽器分頁內讀取，不會上傳到任何地方。</div>
+    </section>`;
+  const wireBatch = () => {
+    if (!batchOn) return;
+    $('bMonth').onchange = e => { state.batchMonth = e.target.value; renderExpiry(); };
+    $('bPec').onclick = () => downloadPec(state.batch.rows, state.batch.ref, state.batch.label, state.batch.kindOf);
+    $('bCsv').onclick = () => download(`${state.batch.label}_名單_${today().replace(/-/g, '')}.csv`, [['工號', '單位', '職稱', '職類', '申請別', '教學點數', '應達點數', '原效期迄日', '提報效期起日', '提報效期迄日'],
+      ...state.batch.rows.map(r => { const p = certPeriod(r, state.batch.ref); return [r.emp_id, r.dept, r.staff?.title, profGroup(r), kindOf(r), r.teach, r.need, r.valid_end, p.start, p.end]; })]);
+  };
+  if (!keys.length) { $('content').innerHTML = modeBar + batchCard; wireBatch(); if (!batchCard) $('content').innerHTML += '<div class="card empty">目前沒有即將到期或可提報的人員。</div>'; return; }
   const prev = state.exp || {};
   const ex = state.exp = { mode, bucket: buckets.has(prev.bucket) ? prev.bucket : keys[0], group: prev.group || '', picked: prev.picked || new Set() };
   const max = Math.max(...keys.map(k => buckets.get(k).rows.length));
@@ -464,18 +542,18 @@ async function renderExpiry() {
     return p.length ? `<span class="gap" title="${esc(r.reason)}">${p.join('・')}</span>` : '<span class="done">已達標</span>';
   };
   const dropCount = other ? rows.filter(drop).length : 0;
-  $('content').innerHTML = modeBar + `
+  $('content').innerHTML = modeBar + batchCard + `
     <section class="card"><h3><span class="step">1</span> 選擇時間　<small class="hint" style="display:inline">長條越長人數越多；綠色為已達標，黃色為尚缺點數</small></h3><div class="drills">${timeRows}</div></section>
     <section class="card"><h3><span class="step">2</span> ${esc(cur.label)}：選擇職類</h3><div class="chips">${chips}</div></section>
     <section class="card"><h3><span class="step">3</span> 名單（${rows.length} 人${ex.group ? '｜' + esc(ex.group) : ''}）</h3>
       ${other ? `<div class="attention">其中 <b>${dropCount}</b> 人在舊制已達標、改採新制後尚未符合，已排在最前面。</div>` : ''}
       <div class="filters">
         ${canPick.length ? `<button class="btn btn-ghost" type="button" id="pickAll">全選可提報（${canPick.length}）</button>
-          <button class="btn btn-primary" style="width:auto" type="button" id="pecBtn">匯出醫策會提報名單</button>` : ''}
+          <button class="btn btn-primary" style="width:auto" type="button" id="pecBtn">下載勾選者的醫策會上傳檔</button>` : ''}
         <button class="btn btn-ghost" type="button" id="listBtn">匯出此名單</button>
         <span class="hint" id="pickN" style="align-self:center;margin:0"></span>
       </div>
-      ${canPick.length ? '<div class="note">提報名單只含工號。下載後在您的電腦執行 <code style="letter-spacing:0">node tools/pec-export.js</code>，會在本機補上姓名與身分證字號，產生醫策會 PEC 平台的上傳檔。</div>' : ''}
+
       <div class="table-wrap"><table><thead><tr><th></th><th>工號</th><th>單位</th><th>職稱</th><th>職類</th><th>效期迄日</th>
         ${other ? '<th>舊制點數</th><th>舊制</th><th>新制（基礎／進階）</th><th>新制</th>' : `<th>教學點數</th><th>缺口</th><th>狀態</th>${exportable ? '<th>提報效期</th>' : ''}`}</tr></thead><tbody>
       ${rows.slice(0, 500).map(r => { const o = other && other.get(r.emp_id); return `<tr class="${drop(r) ? 'row-drop' : ''}">
@@ -491,15 +569,14 @@ async function renderExpiry() {
       ${rows.length > 500 ? '<div class="note">畫面只列前 500 人，請先選職類縮小範圍；匯出則包含全部。</div>' : ''}
     </section>`;
 
+  wireBatch();
   const sync = () => { $('pickN').textContent = ex.picked.size ? `已選 ${ex.picked.size} 人` : ''; };
   document.querySelectorAll('.pick').forEach(c => { c.onchange = () => { c.checked ? ex.picked.add(c.value) : ex.picked.delete(c.value); sync(); }; });
   if ($('pickAll')) $('pickAll').onclick = () => { canPick.forEach(r => ex.picked.add(r.emp_id)); renderExpiry(); };
   if ($('pecBtn')) $('pecBtn').onclick = () => {
     const sel = canPick.filter(r => ex.picked.has(r.emp_id));
     if (!sel.length) return toast('請先勾選要提報的人員（只有已符合資格者可以勾選）', false);
-    download(`PEC提報名單_${mode === 'cutoff' ? '基準日' + cutoff.replace(/-/g, '') + '_' : ''}${today().replace(/-/g, '')}.csv`, [['工號', '職類', '申請別', '教師認證效期起日', '教師認證效期迄日'],
-      ...sel.map(r => { const p = certPeriod(r, refDate); return [r.emp_id, PEC_NAME[r.staff?.profession] || r.staff?.profession, r.track_type === 'initial' ? '新增' : '展延', p.start, p.end]; })]);
-    toast(`已下載 ${sel.length} 人的提報名單`);
+    downloadPec(sel, refDate, '自選名單', kindOf);
   };
   $('listBtn').onclick = () => download(`${cur.label}_${mode === 'both' ? '新舊比較' : mode === 'new' ? '新制試算' : mode === 'cutoff' ? '基準日' + cutoff.replace(/-/g, '') : '名單'}_${today().replace(/-/g, '')}.csv`,
     other ? [['工號', '單位', '職稱', '職類', '效期迄日', '舊制教學點數', '舊制應達', '舊制狀態', '新制基礎', '新制進階', '新制狀態', '新制說明', '舊制達標但新制不符'],
