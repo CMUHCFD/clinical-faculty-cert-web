@@ -200,3 +200,14 @@ tr.row-drop td { background: #FFFBE6; }
 
 .batch { border-top: 5px solid var(--primary); }
 .batch select { padding: 8px 10px; border: 1.5px solid var(--line); border-radius: 8px; background: #fff; font-size: 15px; }
+
+/* 修課紀錄下鑽 */
+dialog#recDlg { width: min(920px, 96vw); max-height: 90vh; border: 0; border-radius: 14px; padding: 0; box-shadow: 0 20px 60px rgba(22,70,97,.35); }
+dialog#recDlg::backdrop { background: rgba(22,70,97,.45); }
+.dlg-body { padding: 18px; overflow: auto; max-height: 90vh; }
+.dlg-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 6px; }
+.dlg-head small { font-weight: 400; color: var(--muted); }
+.rec-sum { margin: 10px 0; padding: 10px 12px; background: var(--primary-light); border-radius: 8px; font-size: 14px; }
+tr.row-hit td { background: #EDF8F6; }
+tr.row-off td { color: var(--muted); }
+.num .btn-link { font-size: 15px; }

@@ -102,8 +102,55 @@ const colsFor = d => `emp_id,dept,computed_at,status_code:${d}->>statusCode,stat
   `need:${d}->>requiredTotalHours,expiring:${d}->>expiringSoon,valid_end:${d}->activeCertificate->>valid_end_roc,on_plan,` +
   `ve:${d}->activeCertificate->>valid_end,basic:${d}->>basicHours,adv:${d}->>advancedHours,gap_t:${d}->>gapTotal,` +
   `gap_b:${d}->>gapBasicHours,gap_a:${d}->>gapAdvancedHours,cp:${d}->>compliant,grace:${d}->renewal->>inGrace,` +
+  `rg:${d}->>regime,wy:${d}->window->years,wl:${d}->window->>label,le:${d}->lastCertificate->>valid_end,` +
   `new_ok:detail->newRulePreview->>wouldQualify,new_reason:detail->newRulePreview->>statusReason,staff(title,profession)`;
 const listCols = () => colsFor(D());
+// ---------- 修課時數下鑽：點時數 → 看是哪些課（日期、課程名稱、時數），並標出哪些計入本次採計 ----------
+// info = { track_type, rg(制度), ve(有效認證迄日), le(已屆滿的上一張迄日), grace, wy(採計年度), wl(採計期間說明) }
+function inWindowFn(info, ref) {
+  const idx = d => Number(d.slice(0, 4)) * 12 + Number(d.slice(5, 7));
+  const now = idx(ref || today());
+  if (info.rg === 'legacy' && info.track_type === 'renewal') {
+    const end = idx(info.ve || info.le || (ref || today()));
+    const to = info.grace === 'true' || info.grace === true ? now : end;      // 保留期內：屆滿後補修的也算
+    return d => idx(d) >= end - 23 && idx(d) <= to;
+  }
+  if (info.rg === 'legacy' && info.track_type === 'initial') return d => idx(d) >= now - 23 && idx(d) <= now;
+  const years = (info.wy || []).map(Number);
+  return d => years.includes(Number(d.slice(0, 4)));
+}
+function recordsTable(records, info, ref) {
+  const inWin = inWindowFn(info, ref);
+  const cert = info.track_type === 'initial' || info.track_type === 'renewal';
+  const rows = (records || []).filter(r => (ref ? r.course_date <= ref : true));
+  const counted = rows.filter(r => inWin(r.course_date) && (Number(r.teaching_hours) > 0 || (!cert && Number(r.general_hours) > 0)));
+  const sumT = Math.round(counted.reduce((a, r) => a + Number(r.teaching_hours), 0) * 10) / 10;
+  const sumG = Math.round(counted.reduce((a, r) => a + Number(r.general_hours), 0) * 10) / 10;
+  const line = r => { const hit = counted.includes(r); return `<tr class="${hit ? 'row-hit' : 'row-off'}">
+    <td>${esc(r.course_date)}</td><td style="white-space:normal;min-width:200px;">${esc(r.course_title)}</td><td>${esc(r.category)}</td>
+    <td class="num">${Number(r.teaching_hours) || ''}</td><td class="num">${Number(r.general_hours) || ''}</td><td>${hit ? '<span class="done">計入</span>' : ''}</td></tr>`; };
+  return `
+    <div class="rec-sum">採計期間：<b>${esc(info.wl || '')}</b>　｜　期間內 <b>${counted.length}</b> 門課，教學能力提升 <b class="num">${sumT}</b> 點${cert ? '' : `、一般醫學 <b class="num">${sumG}</b> 點`}</div>
+    ${rows.length ? `<div class="table-wrap"><table><thead><tr><th>日期</th><th>課程名稱</th><th>類別</th><th>教學點數</th><th>一般點數</th><th>本次採計</th></tr></thead><tbody>
+      ${counted.map(line).join('')}${rows.filter(r => !counted.includes(r)).map(line).join('')}</tbody></table></div>` : '<div class="empty">沒有修課紀錄</div>'}
+    <div class="note">綠底為計入本次採計的課程，排在最前面；灰字為期間外或不屬於教學能力提升的課程。線上課程每年至多採認 1 點，所以這裡的合計可能略高於系統採計的點數。</div>`;
+}
+async function showRecords(empId) {
+  const lists = [state.viewList, state.list, ...Object.values(state.alts || {})].filter(Boolean);
+  const info = lists.map(l => l.find(r => r.emp_id === empId)).find(Boolean);
+  if (!info) return;
+  let dlg = $('recDlg');
+  if (!dlg) { dlg = document.createElement('dialog'); dlg.id = 'recDlg'; document.body.appendChild(dlg); dlg.addEventListener('click', e => { if (e.target === dlg) dlg.close(); }); }
+  dlg.innerHTML = '<div class="dlg-body"><div class="empty">載入中…</div></div>';
+  dlg.showModal();
+  const { data, error } = await sb.from('course_records').select('course_title,course_date,category,teaching_hours,general_hours').eq('emp_id', empId).order('course_date', { ascending: false }).limit(500);
+  dlg.innerHTML = `<div class="dlg-body">
+    <div class="dlg-head"><h3>修課紀錄｜工號 ${esc(empId)}　<small>${esc(info.dept || '')}・${esc(profGroup(info))}</small></h3><button class="btn btn-ghost" type="button" onclick="$('recDlg').close()">關閉</button></div>
+    <div class="rule">${esc(info.status || '')}　系統採計教學點數 <b class="num">${esc(info.teach)}</b> / ${esc(info.need)}</div>
+    ${error ? `<div class="empty">載入失敗：${esc(error.message)}</div>` : recordsTable(data, info, state.viewRef)}
+    <div style="margin-top:10px"><button class="btn btn-ghost" type="button" onclick="$('recDlg').close();go('person','${esc(empId)}')">開啟這位同仁的完整頁面</button></div></div>`;
+}
+
 // 職類分組：護理依所屬單位再分為「護理部」與「非護理部」
 const profGroup = r => {
   const p = r.staff?.profession || '其他';
@@ -203,7 +250,7 @@ async function renderPerson(empId, back) {
   const [{ data: row, error }, { data: staff }, { data: records }, { data: apps }] = await Promise.all([
     sb.from('cert_status').select('*').eq('emp_id', empId).maybeSingle(),
     sb.from('staff').select('emp_id,dept,title,profession').eq('emp_id', empId).maybeSingle(),
-    sb.from('course_records').select('course_title,course_date,category,teaching_hours,general_hours').eq('emp_id', empId).order('course_date', { ascending: false }).limit(300),
+    sb.from('course_records').select('course_title,course_date,category,teaching_hours,general_hours').eq('emp_id', empId).order('course_date', { ascending: false }).limit(500),
     sb.from('applications').select('*').eq('emp_id', empId).order('submitted_at', { ascending: false }).limit(10)
   ]);
   if (error) throw error;
@@ -235,7 +282,7 @@ async function renderPerson(empId, back) {
     </section>`;
 
   const meters = `
-    <section class="card"><h3>進度（${esc(d.window?.label || '')}）</h3><div class="meters">
+    <section class="card"><h3>進度（${esc(d.window?.label || '')}）　<button class="btn-link" type="button" onclick="$('recSection').scrollIntoView({behavior:'smooth'})">看是哪些課 ↓</button></h3><div class="meters">
       ${meter(certTrack ? '教學能力提升' : '年度總點數', certTrack ? d.teachingHours : d.totalHours, d.requiredTotalHours)}
       ${certTrack ? '' : meter('其中教學能力提升', d.teachingHours, d.requiredTeachingHours)}
       ${meter('基礎課程', d.basicHours, d.requiredBasicHours)}
@@ -278,12 +325,9 @@ async function renderPerson(empId, back) {
         <td>${a.valid_start ? `${esc(a.valid_start)} ～ ${esc(a.valid_end)}` : '—'}</td><td class="reason">${esc(a.review_comment || '')}</td></tr>`).join('')}
     </tbody></table></div></section>`;
 
-  const recs = `
-    <section class="card"><h3>修課紀錄（最近 ${records?.length || 0} 筆）</h3>
-      ${(records || []).length ? `<div class="table-wrap"><table><thead><tr><th>日期</th><th>課程</th><th>類別</th><th>教學</th><th>一般</th></tr></thead><tbody>
-        ${records.map(r => `<tr><td>${esc(r.course_date)}</td><td style="white-space:normal;min-width:220px;">${esc(r.course_title)}</td><td>${esc(r.category)}</td><td class="num">${Number(r.teaching_hours) || ''}</td><td class="num">${Number(r.general_hours) || ''}</td></tr>`).join('')}
-      </tbody></table></div>` : '<div class="empty">沒有修課紀錄</div>'}
-    </section>`;
+  const info = { track_type: d.trackType, rg: d.regime, ve: cert && cert.valid_end, le: d.lastCertificate && d.lastCertificate.valid_end,
+    grace: d.renewal && d.renewal.inGrace, wy: d.window && d.window.years, wl: d.window && d.window.label };
+  const recs = `<section class="card" id="recSection"><h3>修課紀錄（日期、課程名稱、時數）</h3>${recordsTable(records, info)}</section>`;
 
   $('content').innerHTML = hero + meters + preview + years + items + appList + recs;
   if ($('applyForm')) $('applyForm').onsubmit = e => {
@@ -311,6 +355,7 @@ const LEGEND = '<div class="legend"><span><i style="background:var(--success)"><
 
 async function renderList() {
   const list = await loadList();
+  state.viewList = list; state.viewRef = undefined;
   const count = c => list.filter(r => r.status_code === c).length;
   const kpis = isAdmin() ? '' : `
     <section class="kpis">
@@ -342,7 +387,7 @@ async function renderList() {
     $('tb').innerHTML = rows.slice(0, 300).map(r => `<tr>
       <td><button class="btn-link" type="button" onclick="go('person','${esc(r.emp_id)}')">${esc(r.emp_id)}</button>${r.on_plan ? ' <span class="pill eligible" title="列入本年度追蹤名單">追蹤</span>' : ''}</td>
       <td>${esc(r.dept)}</td><td>${esc(r.staff?.title || '')}</td><td>${esc(profGroup(r))}</td>
-      <td class="num">${esc(r.teach)} / ${esc(r.need)}</td>
+      <td class="num"><button class="btn-link" type="button" title="查看修課紀錄" onclick="showRecords('${esc(r.emp_id)}')">${esc(r.teach)}</button> / ${esc(r.need)}</td>
       <td><span class="pill ${esc(r.status_code)}">${esc(r.status)}</span>${r.valid_end ? `<br><small>至 ${esc(r.valid_end)}</small>` : ''}</td>
       <td class="reason">${esc(r.reason)}</td>
       <td>${r.new_ok === 'true' ? '<span class="pill valid">符合</span>' : r.new_ok === 'false' ? `<span class="pill expiring" title="${esc(r.new_reason)}">尚未符合</span>` : ''}</td>
@@ -450,6 +495,7 @@ async function renderExpiry() {
   const alt = mode === 'new' || mode === 'both' ? await loadNewRegimeList() : null;
   const list = mode === 'cutoff' ? await loadAltList('detail->batch') : mode === 'new' ? alt : base;
   const refDate = mode === 'cutoff' ? cutoff : undefined;
+  state.viewList = list; state.viewRef = refDate;
   const other = mode === 'both' ? new Map(alt.map(r => [r.emp_id, r])) : null;
   const ready = r => !!r && (r.can_apply || r.cp === 'true');
   const buckets = new Map();
@@ -560,9 +606,9 @@ async function renderExpiry() {
         <td>${canPick.length && r.can_apply ? `<input type="checkbox" class="pick" value="${esc(r.emp_id)}" ${ex.picked.has(r.emp_id) ? 'checked' : ''} aria-label="選取 ${esc(r.emp_id)}">` : ''}</td>
         <td><button class="btn-link" type="button" onclick="go('person','${esc(r.emp_id)}')">${esc(r.emp_id)}</button></td>
         <td>${esc(r.dept)}</td><td>${esc(r.staff?.title || '')}</td><td>${esc(profGroup(r))}</td><td>${esc(r.valid_end || '—')}</td>
-        ${other ? `<td class="num"><b>${esc(r.teach)}</b> / ${esc(r.need)}</td><td>${gap(r)}</td>
+        ${other ? `<td class="num"><button class="btn-link" type="button" title="查看修課紀錄" onclick="showRecords('${esc(r.emp_id)}')">${esc(r.teach)}</button> / ${esc(r.need)}</td><td>${gap(r)}</td>
             <td class="num">${o ? `<b>${esc(o.basic)}</b>／<b>${esc(o.adv)}</b>` : '—'}</td><td>${gap(o)}</td>`
-          : `<td class="num"><b>${esc(r.teach)}</b> / ${esc(r.need)}</td><td>${gap(r)}</td>
+          : `<td class="num"><button class="btn-link" type="button" title="查看修課紀錄" onclick="showRecords('${esc(r.emp_id)}')">${esc(r.teach)}</button> / ${esc(r.need)}</td><td>${gap(r)}</td>
             <td><span class="pill ${esc(r.status_code)}">${esc(r.status)}</span></td>
             ${exportable ? `<td class="num">${r.can_apply ? (p => `${p.start}–${p.end}`)(certPeriod(r, refDate)) : ''}</td>` : ''}`}
       </tr>`; }).join('')}</tbody></table></div>
