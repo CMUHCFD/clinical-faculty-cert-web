@@ -125,16 +125,18 @@ async function loadList(force) {
   return state.list;
 }
 
-// 另一套制度的名單（只供「到期與提報」的比較檢視使用；不改變全院實際適用的制度）
-async function loadNewRegimeList() {
+// 另一份計算結果的名單（新制試算 detail_new、批次基準日 detail->batch）；只供「到期與提報」使用
+async function loadAltList(col) {
   const base = await loadList();
-  if (state.altFor !== base) {
-    const rows = await fetchAll(() => sb.from('cert_status').select(colsFor('detail_new')).order('emp_id'));
+  if (state.altFor !== base) { state.alts = {}; state.altFor = base; }
+  if (!state.alts[col]) {
+    const rows = await fetchAll(() => sb.from('cert_status').select(colsFor(col)).not(col, 'is', null).order('emp_id'));
     rows.forEach(r => { r.can_apply = r.ie === 'true' || r.rc === 'true'; r.new_ok = null; });
-    state.alt = rows; state.altFor = base;
+    state.alts[col] = rows;
   }
-  return state.alt;
+  return state.alts[col];
 }
+const loadNewRegimeList = () => loadAltList('detail_new');
 
 async function boot() {
   const { data: { session } } = await sb.auth.getSession();
@@ -181,7 +183,11 @@ function go(view, arg) {
   $('content').innerHTML = '<div class="card empty">載入中…</div>';
   const run = { mine: () => renderPerson(state.me.emp_id), person: () => renderPerson(arg, true), dept: renderList, all: renderOverview,
     courses: renderCourses, review: renderReview, roster: renderRoster, admin: renderAdmin, expiry: renderExpiry }[view];
-  run().catch(err => { $('content').innerHTML = `<div class="card empty">載入失敗：${esc(err.message || err)}</div>`; });
+  // 連續快速切換頁面時，較早的頁面可能較晚才載完而蓋掉畫面：發現過期就重畫目前頁面
+  const token = state.nav = (state.nav || 0) + 1;
+  state.arg = arg;
+  run().catch(err => { $('content').innerHTML = `<div class="card empty">載入失敗：${esc(err.message || err)}</div>`; })
+    .then(() => { if (token !== state.nav && !state.redraw) { state.redraw = true; go(state.view, state.arg); state.redraw = false; } });
   window.scrollTo(0, 0);
 }
 
@@ -370,8 +376,8 @@ async function renderOverview() {
 
 // ---------- 到期與提報：① 選時間 → ② 選職類 → ③ 名單與匯出（分段下鑽） ----------
 // 下一段認證效期（與伺服器核准時的算法相同；回傳民國日期，供醫策會提報檔使用）
-function certPeriod(r) {
-  const t = today(), roc = d => `${Number(d.slice(0, 4)) - 1911}/${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
+function certPeriod(r, ref) {
+  const t = ref || today(), roc = d => `${Number(d.slice(0, 4)) - 1911}/${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
   const renewing = r.ve && r.ve >= t;
   let start, end;
   if (state.regime === 'legacy') {
@@ -389,10 +395,15 @@ function certPeriod(r) {
 
 async function renderExpiry() {
   const canCompare = state.regime === 'legacy';     // 全院已採新制時，兩套結果相同，不需比較
-  const mode = canCompare ? ((state.exp && state.exp.mode) || 'legacy') : 'actual';
+  const cutoff = state.rules.batch_cutoff || null;  // 批次基準日（例如 9/30）
+  const rocDate = d => `${Number(d.slice(0, 4)) - 1911}/${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
+  let mode = (state.exp && state.exp.mode) || (canCompare ? 'legacy' : 'actual');
+  if (mode === 'cutoff' && !cutoff) mode = canCompare ? 'legacy' : 'actual';
+  if (!canCompare && mode !== 'cutoff') mode = 'actual';
   const base = await loadList();
   const alt = mode === 'new' || mode === 'both' ? await loadNewRegimeList() : null;
-  const list = mode === 'new' ? alt : base;
+  const list = mode === 'cutoff' ? await loadAltList('detail->batch') : mode === 'new' ? alt : base;
+  const refDate = mode === 'cutoff' ? cutoff : undefined;
   const other = mode === 'both' ? new Map(alt.map(r => [r.emp_id, r])) : null;
   const ready = r => !!r && (r.can_apply || r.cp === 'true');
   const buckets = new Map();
@@ -403,12 +414,18 @@ async function renderExpiry() {
     else if (r.track_type === 'initial' && r.can_apply) put('~initial', '初次認證可提報', '尚無認證、已符合資格', r);
   });
   const keys = [...buckets.keys()].sort();
-  const modeBar = !canCompare ? '' : `
+  const modes = [...(canCompare ? [['legacy', '舊制（目前適用）'], ['new', '新制試算'], ['both', '新舊並排比較']] : [['actual', '目前']]),
+    ...(cutoff ? [['cutoff', `基準日 ${rocDate(cutoff)} 批次`]] : [])];
+  const modeNote = {
+    both: '每一列上方的長條是舊制、下方是新制；名單會標出「舊制已達標、新制尚未符合」的人，這些人需要在改制前補修。',
+    new: '以同一份修課紀錄改用新制計算的結果，僅供試算，不影響目前實際適用的制度；提報名單請回到「舊制」或「基準日批次」檢視匯出。',
+    cutoff: cutoff ? `只採計 ${rocDate(cutoff)}（含）以前完成的課程，並以這一天判定到期與保留期。已認證教師：效期屆滿前 2 年內滿 8 點；新增：${rocDate(cutoff)} 往前 2 年內滿 10 點。` : '',
+    legacy: '目前實際適用的制度，採計到最新一次資料更新為止的課程。', actual: '採計到最新一次資料更新為止的課程。'
+  }[mode];
+  const modeBar = modes.length < 2 ? '' : `
     <section class="card"><h3>檢視方式</h3><div class="seg" role="tablist">
-      ${[['legacy', '舊制（目前適用）'], ['new', '新制試算'], ['both', '新舊並排比較']].map(([m, t]) => `<button type="button" role="tab" class="${mode === m ? 'is-active' : ''}" onclick="state.exp={mode:'${m}',bucket:state.exp&&state.exp.bucket,group:'',picked:new Set()};renderExpiry()">${t}</button>`).join('')}
-    </div><div class="note">${mode === 'both' ? '每一列上方的長條是舊制、下方是新制；名單會標出「舊制已達標、新制尚未符合」的人，這些人需要在改制前補修。'
-      : mode === 'new' ? '以同一份修課紀錄改用新制計算的結果，僅供試算，不影響目前實際適用的制度；提報名單請回到「舊制」檢視匯出。'
-      : '目前實際適用的制度。'}</div></section>`;
+      ${modes.map(([m, t]) => `<button type="button" role="tab" class="${mode === m ? 'is-active' : ''}" onclick="state.exp={mode:'${m}',bucket:state.exp&&state.exp.bucket,group:'',picked:new Set()};renderExpiry()">${t}</button>`).join('')}
+    </div><div class="note">${modeNote}</div></section>`;
   if (!keys.length) { $('content').innerHTML = modeBar + '<div class="card empty">目前沒有即將到期或可提報的人員。</div>'; return; }
   const prev = state.exp || {};
   const ex = state.exp = { mode, bucket: buckets.has(prev.bucket) ? prev.bucket : keys[0], group: prev.group || '', picked: prev.picked || new Set() };
@@ -469,7 +486,7 @@ async function renderExpiry() {
             <td class="num">${o ? `<b>${esc(o.basic)}</b>／<b>${esc(o.adv)}</b>` : '—'}</td><td>${gap(o)}</td>`
           : `<td class="num"><b>${esc(r.teach)}</b> / ${esc(r.need)}</td><td>${gap(r)}</td>
             <td><span class="pill ${esc(r.status_code)}">${esc(r.status)}</span></td>
-            ${exportable ? `<td class="num">${r.can_apply ? (p => `${p.start}–${p.end}`)(certPeriod(r)) : ''}</td>` : ''}`}
+            ${exportable ? `<td class="num">${r.can_apply ? (p => `${p.start}–${p.end}`)(certPeriod(r, refDate)) : ''}</td>` : ''}`}
       </tr>`; }).join('')}</tbody></table></div>
       ${rows.length > 500 ? '<div class="note">畫面只列前 500 人，請先選職類縮小範圍；匯出則包含全部。</div>' : ''}
     </section>`;
@@ -480,11 +497,11 @@ async function renderExpiry() {
   if ($('pecBtn')) $('pecBtn').onclick = () => {
     const sel = canPick.filter(r => ex.picked.has(r.emp_id));
     if (!sel.length) return toast('請先勾選要提報的人員（只有已符合資格者可以勾選）', false);
-    download(`PEC提報名單_${today().replace(/-/g, '')}.csv`, [['工號', '職類', '申請別', '教師認證效期起日', '教師認證效期迄日'],
-      ...sel.map(r => { const p = certPeriod(r); return [r.emp_id, PEC_NAME[r.staff?.profession] || r.staff?.profession, r.track_type === 'initial' ? '新增' : '展延', p.start, p.end]; })]);
+    download(`PEC提報名單_${mode === 'cutoff' ? '基準日' + cutoff.replace(/-/g, '') + '_' : ''}${today().replace(/-/g, '')}.csv`, [['工號', '職類', '申請別', '教師認證效期起日', '教師認證效期迄日'],
+      ...sel.map(r => { const p = certPeriod(r, refDate); return [r.emp_id, PEC_NAME[r.staff?.profession] || r.staff?.profession, r.track_type === 'initial' ? '新增' : '展延', p.start, p.end]; })]);
     toast(`已下載 ${sel.length} 人的提報名單`);
   };
-  $('listBtn').onclick = () => download(`${cur.label}_${mode === 'both' ? '新舊比較' : mode === 'new' ? '新制試算' : '名單'}_${today().replace(/-/g, '')}.csv`,
+  $('listBtn').onclick = () => download(`${cur.label}_${mode === 'both' ? '新舊比較' : mode === 'new' ? '新制試算' : mode === 'cutoff' ? '基準日' + cutoff.replace(/-/g, '') : '名單'}_${today().replace(/-/g, '')}.csv`,
     other ? [['工號', '單位', '職稱', '職類', '效期迄日', '舊制教學點數', '舊制應達', '舊制狀態', '新制基礎', '新制進階', '新制狀態', '新制說明', '舊制達標但新制不符'],
         ...rows.map(r => { const o = other.get(r.emp_id) || {}; return [r.emp_id, r.dept, r.staff?.title, profGroup(r), r.valid_end, r.teach, r.need, r.status, o.basic, o.adv, o.status, o.reason, drop(r) ? '是' : '']; })]
       : [['工號', '單位', '職稱', '職類', '效期迄日', '教學點數', '應達點數', '尚缺', '狀態', '說明'],
