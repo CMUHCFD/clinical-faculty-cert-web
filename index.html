@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>臨床教師認證</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+  <!-- 登入／開通 -->
+  <main id="authView" class="auth" hidden>
+    <div class="auth-card">
+      <h1>臨床教師認證</h1>
+      <p class="auth-sub">師資培育中心</p>
+
+      <div class="tabs" role="tablist">
+        <button id="tabLogin" class="tab is-active" role="tab" type="button">登入</button>
+        <button id="tabActivate" class="tab" role="tab" type="button">第一次使用／忘記密碼</button>
+      </div>
+
+      <form id="loginForm" autocomplete="on">
+        <label>員工工號<input id="loginEmp" type="text" autocomplete="username" required></label>
+        <label>密碼<input id="loginPw" type="password" autocomplete="current-password" required></label>
+        <button class="btn btn-primary" type="submit">登入</button>
+      </form>
+
+      <form id="activateForm" hidden autocomplete="off">
+        <p class="hint">請輸入師培中心發給您的一次性開通碼，並自訂密碼。</p>
+        <label>員工工號<input id="actEmp" type="text" required></label>
+        <label>開通碼<input id="actCode" type="text" maxlength="8" required style="letter-spacing:.2em;text-transform:uppercase;"></label>
+        <label>自訂密碼（至少 8 個字元）<input id="actPw" type="password" minlength="8" autocomplete="new-password" required></label>
+        <label>再輸入一次<input id="actPw2" type="password" minlength="8" autocomplete="new-password" required></label>
+        <button class="btn btn-primary" type="submit">開通並登入</button>
+      </form>
+
+      <p id="authMsg" class="msg" role="alert"></p>
+    </div>
+  </main>
+
+  <!-- 主畫面 -->
+  <div id="appView" hidden>
+    <header class="topbar">
+      <div class="brand">臨床教師認證</div>
+      <nav id="nav" class="nav"></nav>
+      <div class="who">
+        <span id="whoText"></span>
+        <button id="logoutBtn" class="btn btn-ghost" type="button">登出</button>
+      </div>
+    </header>
+    <main id="content" class="content"></main>
+    <footer class="foot">資料更新時間：<span id="asOf">—</span>。本站不顯示姓名，一律以工號識別。</footer>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

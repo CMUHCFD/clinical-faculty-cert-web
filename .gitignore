@@ -1,0 +1,8 @@
+# data, spreadsheets and secrets never belong in this public repo
+*.xlsx
+*.xls
+*.csv
+*.sqlite
+.env
+data/
+out/
