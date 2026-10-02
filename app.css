@@ -161,3 +161,28 @@ code { background: var(--primary-light); padding: 2px 8px; border-radius: 4px; f
   .nav button { white-space: nowrap; flex: 0 0 auto; }
   .qr-wrap { justify-content: center; }
 }
+/* 到期與提報：分段下鑽（一次只做一個決定） */
+.step { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--primary); color: #fff; font-size: 13px; margin-right: 6px; }
+.drills { display: grid; gap: 6px; }
+.drill { display: grid; grid-template-columns: minmax(150px, 1.1fr) 3fr minmax(210px, 1.4fr); gap: 12px; align-items: center; text-align: left; padding: 10px 12px; border: 2px solid transparent; border-radius: 10px; background: var(--bg); cursor: pointer; }
+.drill:hover { background: var(--primary-light); }
+.drill.is-active { border-color: var(--primary); background: var(--primary-light); }
+.drill-label b { display: block; color: var(--primary-dark); }
+.drill-label small { color: var(--muted); }
+.drill .bar, .chip .bar { display: flex; height: 14px; border-radius: 7px; overflow: hidden; background: #e8edf0; }
+.drill .bar i, .chip .bar i { display: block; height: 100%; }
+.drill-num { font-size: 13px; color: var(--muted); }
+.drill-num b { color: var(--text); }
+.chips { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; }
+.chip { text-align: left; padding: 10px 12px; border: 2px solid var(--line); border-radius: 10px; background: #fff; cursor: pointer; display: grid; gap: 4px; }
+.chip b { color: var(--primary-dark); font-size: 14px; }
+.chip span.num { font-size: 12.5px; color: var(--muted); }
+.chip .bar { height: 6px; }
+.chip.is-active { border-color: var(--primary); background: var(--primary-light); }
+.gap { color: #b3261e; font-size: 13px; font-variant-numeric: tabular-nums; cursor: help; }
+.done { color: #2b7a6b; font-weight: 700; font-size: 13px; }
+td input[type=checkbox] { width: 18px; height: 18px; }
+@media (max-width: 760px) {
+  .drill { grid-template-columns: 1fr; gap: 6px; }
+  .drill .bar { width: 100% !important; }
+}

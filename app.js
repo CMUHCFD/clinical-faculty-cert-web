@@ -100,7 +100,20 @@ const D = () => (state.regime === 'new' ? 'detail_new' : 'detail');   // 依目�
 const listCols = () => `emp_id,dept,computed_at,status_code:${D()}->>statusCode,status:${D()}->>status,track_type:${D()}->>trackType,` +
   `ie:${D()}->>initialEligible,rc:${D()}->>renewalCompliant,reason:${D()}->>statusReason,teach:${D()}->>teachingHours,` +
   `need:${D()}->>requiredTotalHours,expiring:${D()}->>expiringSoon,valid_end:${D()}->activeCertificate->>valid_end_roc,on_plan,` +
+  `ve:${D()}->activeCertificate->>valid_end,basic:${D()}->>basicHours,adv:${D()}->>advancedHours,gap_t:${D()}->>gapTotal,` +
+  `gap_b:${D()}->>gapBasicHours,gap_a:${D()}->>gapAdvancedHours,cp:${D()}->>compliant,grace:${D()}->renewal->>inGrace,` +
   `new_ok:detail->newRulePreview->>wouldQualify,new_reason:detail->newRulePreview->>statusReason,staff(title,profession)`;
+// 職類分組：護理依所屬單位再分為「護理部」與「非護理部」
+const profGroup = r => {
+  const p = r.staff?.profession || '其他';
+  return p === '護理' ? ((r.dept || '').startsWith('護理部') ? '護理（護理部）' : '護理（非護理部）') : p;
+};
+const PEC_NAME = { '藥師': '藥事', '檢驗': '醫事檢驗', '放射師(放射診斷、放射腫瘤、核子醫學)': '醫事放射' };
+function download(name, rows) {
+  const csv = '﻿' + rows.map(r => r.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = name; a.click();
+}
 async function loadList(force) {
   if (force || !state.list) {
     const rows = await fetchAll(() => sb.from('cert_status').select(listCols()).order('emp_id'));
@@ -129,8 +142,8 @@ async function boot() {
   $('whoText').textContent = `${state.me.emp_id}｜${ROLE_LABEL[state.role]}`;
 
   const views = [];
-  if (isAdmin()) views.push(['all', '全院總覽'], ['dept', '名單查詢']);
-  if (state.role === 'dept_coordinator') views.push(['dept', '科部總覽']);
+  if (isAdmin()) views.push(['all', '全院總覽'], ['expiry', '到期與提報'], ['dept', '名單查詢']);
+  if (state.role === 'dept_coordinator') views.push(['dept', '科部總覽'], ['expiry', '到期與提報']);
   views.push(['mine', '我的認證'], ['courses', '課程']);
   if (isAdmin()) views.push(['review', '審查']);
   if (isAdmin() || state.role === 'dept_coordinator') views.push(['roster', '追蹤名單']);
@@ -155,7 +168,7 @@ function go(view, arg) {
   $('nav').querySelectorAll('button').forEach(b => b.classList.toggle('is-active', b.dataset.view === view));
   $('content').innerHTML = '<div class="card empty">載入中…</div>';
   const run = { mine: () => renderPerson(state.me.emp_id), person: () => renderPerson(arg, true), dept: renderList, all: renderOverview,
-    courses: renderCourses, review: renderReview, roster: renderRoster, admin: renderAdmin }[view];
+    courses: renderCourses, review: renderReview, roster: renderRoster, admin: renderAdmin, expiry: renderExpiry }[view];
   run().catch(err => { $('content').innerHTML = `<div class="card empty">載入失敗：${esc(err.message || err)}</div>`; });
   window.scrollTo(0, 0);
 }
@@ -267,7 +280,7 @@ const ORDER = { expiring: 0, remedy: 1, eligible: 2, expired: 3, deficient: 4, v
 function distRows(list) {
   const by = {};
   list.forEach(r => {
-    const k = r.staff?.profession || '其他';
+    const k = profGroup(r);
     by[k] = by[k] || { total: 0, valid: 0, eligible: 0, other: 0 };
     by[k].total++; by[k][r.status_code === 'valid' ? 'valid' : r.status_code === 'eligible' ? 'eligible' : 'other']++;
   });
@@ -310,7 +323,7 @@ async function renderList() {
     $('fN').textContent = `${rows.length} / ${list.length} 人${rows.length > 300 ? '（顯示前 300 筆，請用搜尋縮小範圍）' : ''}`;
     $('tb').innerHTML = rows.slice(0, 300).map(r => `<tr>
       <td><button class="btn-link" type="button" onclick="go('person','${esc(r.emp_id)}')">${esc(r.emp_id)}</button>${r.on_plan ? ' <span class="pill eligible" title="列入本年度追蹤名單">追蹤</span>' : ''}</td>
-      <td>${esc(r.dept)}</td><td>${esc(r.staff?.title || '')}</td><td>${esc(r.staff?.profession || '')}</td>
+      <td>${esc(r.dept)}</td><td>${esc(r.staff?.title || '')}</td><td>${esc(profGroup(r))}</td>
       <td class="num">${esc(r.teach)} / ${esc(r.need)}</td>
       <td><span class="pill ${esc(r.status_code)}">${esc(r.status)}</span>${r.valid_end ? `<br><small>至 ${esc(r.valid_end)}</small>` : ''}</td>
       <td class="reason">${esc(r.reason)}</td>
@@ -341,6 +354,103 @@ async function renderOverview() {
       符合初次認證：<b class="num">${list.filter(r => r.track_type === 'initial' && r.new_ok === 'true').length}</b> 人（目前 ${initial.length} 人）。</div>
       <div class="note">到「名單查詢」選「新制試算不符合」可列出需要提前補修的人員。</div></section>` : ''}
     <section class="card"><h3>醫事職類認證分佈</h3>${LEGEND}${distRows(cert)}</section>`;
+}
+
+// ---------- 到期與提報：① 選時間 → ② 選職類 → ③ 名單與匯出（分段下鑽） ----------
+// 下一段認證效期（與伺服器核准時的算法相同；回傳民國日期，供醫策會提報檔使用）
+function certPeriod(r) {
+  const t = today(), roc = d => `${Number(d.slice(0, 4)) - 1911}/${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
+  const renewing = r.ve && r.ve >= t;
+  let start, end;
+  if (state.regime === 'legacy') {
+    const years = (state.rules.legacy || {}).cert_validity_years || 2;
+    if (renewing) { const d = new Date(`${r.ve}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + 1); start = d.toISOString().slice(0, 10); }
+    else { const y = Number(t.slice(0, 4)), m = Number(t.slice(5, 7)); start = m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, '0')}-01`; }
+    end = `${Number(start.slice(0, 4)) + years - 1}-12-31`;
+  } else {
+    const years = (state.rules.general || {}).cert_validity_years || 4;
+    const sy = (renewing ? Number(r.ve.slice(0, 4)) : Number(t.slice(0, 4))) + 1;
+    start = `${sy}-01-01`; end = `${sy + years - 1}-12-31`;
+  }
+  return { start: roc(start), end: roc(end) };
+}
+
+async function renderExpiry() {
+  const list = await loadList();
+  const ready = r => r.can_apply || r.cp === 'true';
+  const buckets = new Map();
+  const put = (key, label, hint, r) => { if (!buckets.has(key)) buckets.set(key, { key, label, hint, rows: [] }); buckets.get(key).rows.push(r); };
+  list.forEach(r => {
+    if (r.track_type === 'renewal' && r.ve) put(r.ve.slice(0, 7), `${Number(r.ve.slice(0, 4)) - 1911} 年 ${Number(r.ve.slice(5, 7))} 月屆滿`, '效期內教師', r);
+    else if (r.grace === 'true') put('~grace', '展延保留期內', '效期已屆滿，尚可補足', r);
+    else if (r.track_type === 'initial' && r.can_apply) put('~initial', '初次認證可提報', '尚無認證、已符合資格', r);
+  });
+  const keys = [...buckets.keys()].sort();
+  if (!keys.length) { $('content').innerHTML = '<div class="card empty">目前沒有即將到期或可提報的人員。</div>'; return; }
+  const ex = state.exp = state.exp && buckets.has(state.exp.bucket) ? state.exp : { bucket: keys[0], group: '', picked: new Set() };
+  const max = Math.max(...keys.map(k => buckets.get(k).rows.length));
+
+  const timeRows = keys.map(k => {
+    const b = buckets.get(k), ok = b.rows.filter(ready).length;
+    return `<button type="button" class="drill ${ex.bucket === k ? 'is-active' : ''}" onclick="state.exp={bucket:'${k}',group:'',picked:new Set()};renderExpiry()">
+      <span class="drill-label"><b>${esc(b.label)}</b><small>${esc(b.hint)}</small></span>
+      <span class="bar" style="width:${Math.max(6, b.rows.length / max * 100)}%"><i style="width:${ok / b.rows.length * 100}%;background:var(--success)"></i><i style="width:${(b.rows.length - ok) / b.rows.length * 100}%;background:var(--warning)"></i></span>
+      <span class="drill-num num"><b>${b.rows.length}</b> 人・已達標 <b>${ok}</b>・尚缺 <b>${b.rows.length - ok}</b></span></button>`;
+  }).join('');
+
+  const cur = buckets.get(ex.bucket);
+  const groups = {};
+  cur.rows.forEach(r => { const g = profGroup(r); groups[g] = groups[g] || { n: 0, ok: 0 }; groups[g].n++; if (ready(r)) groups[g].ok++; });
+  const chips = [['', '全部職類', cur.rows.length, cur.rows.filter(ready).length], ...Object.entries(groups).sort((a, b) => b[1].n - a[1].n).map(([g, v]) => [g, g, v.n, v.ok])]
+    .map(([g, label, n, ok]) => `<button type="button" class="chip ${ex.group === g ? 'is-active' : ''}" onclick="state.exp.group='${esc(g)}';state.exp.picked=new Set();renderExpiry()">
+      <b>${esc(label)}</b><span class="num">${ok} / ${n} 已達標</span><span class="bar"><i style="width:${n ? ok / n * 100 : 0}%;background:var(--success)"></i></span></button>`).join('');
+
+  const rows = cur.rows.filter(r => !ex.group || profGroup(r) === ex.group).sort((a, b) => Number(ready(a)) - Number(ready(b)) || a.emp_id.localeCompare(b.emp_id));
+  const canPick = rows.filter(r => r.can_apply);
+  const gap = r => {
+    const p = [];
+    if (Number(r.gap_t) > 0) p.push(`總點數 −${r.gap_t}`);
+    if (Number(r.gap_b) > 0) p.push(`基礎 −${r.gap_b}`);
+    if (Number(r.gap_a) > 0) p.push(`進階 −${r.gap_a}`);
+    return p.length ? `<span class="gap" title="${esc(r.reason)}">${p.join('・')}</span>` : '<span class="done">已達標</span>';
+  };
+  $('content').innerHTML = `
+    <section class="card"><h3><span class="step">1</span> 選擇時間　<small class="hint" style="display:inline">長條越長人數越多；綠色為已達標，黃色為尚缺點數</small></h3><div class="drills">${timeRows}</div></section>
+    <section class="card"><h3><span class="step">2</span> ${esc(cur.label)}：選擇職類</h3><div class="chips">${chips}</div></section>
+    <section class="card"><h3><span class="step">3</span> 名單（${rows.length} 人${ex.group ? '｜' + esc(ex.group) : ''}）</h3>
+      <div class="filters">
+        ${isAdmin() && canPick.length ? `<button class="btn btn-ghost" type="button" id="pickAll">全選可提報（${canPick.length}）</button>
+          <button class="btn btn-primary" style="width:auto" type="button" id="pecBtn">匯出醫策會提報名單</button>` : ''}
+        <button class="btn btn-ghost" type="button" id="listBtn">匯出此名單</button>
+        <span class="hint" id="pickN" style="align-self:center;margin:0"></span>
+      </div>
+      ${isAdmin() && canPick.length ? '<div class="note">提報名單只含工號。下載後在您的電腦執行 <code style="letter-spacing:0">node tools/pec-export.js</code>，會在本機補上姓名與身分證字號，產生醫策會 PEC 平台的上傳檔。</div>' : ''}
+      <div class="table-wrap"><table><thead><tr><th></th><th>工號</th><th>單位</th><th>職稱</th><th>職類</th><th>效期迄日</th><th>教學點數</th><th>缺口</th><th>狀態</th><th>提報效期</th>${state.regime === 'legacy' ? '<th>新制試算</th>' : ''}</tr></thead><tbody>
+      ${rows.slice(0, 500).map(r => `<tr>
+        <td>${isAdmin() && r.can_apply ? `<input type="checkbox" class="pick" value="${esc(r.emp_id)}" ${ex.picked.has(r.emp_id) ? 'checked' : ''} aria-label="選取 ${esc(r.emp_id)}">` : ''}</td>
+        <td><button class="btn-link" type="button" onclick="go('person','${esc(r.emp_id)}')">${esc(r.emp_id)}</button></td>
+        <td>${esc(r.dept)}</td><td>${esc(r.staff?.title || '')}</td><td>${esc(profGroup(r))}</td><td>${esc(r.valid_end || '—')}</td>
+        <td class="num"><b>${esc(r.teach)}</b> / ${esc(r.need)}</td><td>${gap(r)}</td>
+        <td><span class="pill ${esc(r.status_code)}">${esc(r.status)}</span></td>
+        <td class="num">${r.can_apply ? (p => `${p.start}–${p.end}`)(certPeriod(r)) : ''}</td>
+        ${state.regime === 'legacy' ? `<td>${r.new_ok === 'true' ? '<span class="pill valid">符合</span>' : r.new_ok === 'false' ? `<span class="pill expiring" title="${esc(r.new_reason)}">尚未符合</span>` : ''}</td>` : ''}
+      </tr>`).join('')}</tbody></table></div>
+      ${rows.length > 500 ? '<div class="note">畫面只列前 500 人，請先選職類縮小範圍；匯出則包含全部。</div>' : ''}
+    </section>`;
+
+  const sync = () => { $('pickN').textContent = ex.picked.size ? `已選 ${ex.picked.size} 人` : ''; };
+  document.querySelectorAll('.pick').forEach(c => { c.onchange = () => { c.checked ? ex.picked.add(c.value) : ex.picked.delete(c.value); sync(); }; });
+  if ($('pickAll')) $('pickAll').onclick = () => { canPick.forEach(r => ex.picked.add(r.emp_id)); renderExpiry(); };
+  if ($('pecBtn')) $('pecBtn').onclick = () => {
+    const sel = canPick.filter(r => ex.picked.has(r.emp_id));
+    if (!sel.length) return toast('請先勾選要提報的人員（只有已符合資格者可以勾選）', false);
+    download(`PEC提報名單_${today().replace(/-/g, '')}.csv`, [['工號', '職類', '申請別', '教師認證效期起日', '教師認證效期迄日'],
+      ...sel.map(r => { const p = certPeriod(r); return [r.emp_id, PEC_NAME[r.staff?.profession] || r.staff?.profession, r.track_type === 'initial' ? '新增' : '展延', p.start, p.end]; })]);
+    toast(`已下載 ${sel.length} 人的提報名單`);
+  };
+  $('listBtn').onclick = () => download(`${cur.label}_${today().replace(/-/g, '')}.csv`, [['工號', '單位', '職稱', '職類', '效期迄日', '教學點數', '應達點數', '尚缺', '狀態', '說明'],
+    ...rows.map(r => [r.emp_id, r.dept, r.staff?.title, profGroup(r), r.valid_end, r.teach, r.need, r.gap_t, r.status, r.reason])]);
+  sync();
 }
 
 // ---------- 課程：開課、報名、QR 簽到 ----------
