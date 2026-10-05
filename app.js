@@ -168,6 +168,16 @@ async function showRecords(empId) {
     <div style="margin-top:10px"><button class="btn btn-ghost" type="button" onclick="$('recDlg').close();go('person','${esc(empId)}')">開啟這位同仁的完整頁面</button></div></div>`;
 }
 
+const pecEx = emp => (state.pecEx || {})[emp];
+const pecTag = emp => pecEx(emp) ? ` <span class="pill expired" title="${esc(pecEx(emp).reason)}">醫策會不受理</span>` : '';
+async function togglePec(emp, remove) {
+  const reason = remove ? '' : ($('pecReason') ? $('pecReason').value : '執業登記不在本院');
+  const d = await act('admin.pecFlag', { emp_id: emp, reason, remove });
+  if (!d) return;
+  const { data } = await sb.from('settings').select('value').eq('key', 'pec_exclusions').maybeSingle();
+  state.pecEx = (data && data.value) || {};
+  renderPerson(emp, state.view === 'person');
+}
 const nameOf = emp => (state.roster && state.roster.get(String(emp).toLowerCase()) || {}).name || '';
 const empLabel = emp => `${esc(emp)}${nameOf(emp) ? ` <span class="nm">${esc(nameOf(emp))}</span>` : ''}`;
 const nameBtn = () => (isAdmin() || state.role === 'dept_coordinator')
@@ -221,6 +231,8 @@ async function boot() {
     sb.from('staff').select('emp_id,dept,title,profession').eq('emp_id', profile.emp_id).maybeSingle(),
     sb.from('settings').select('value').eq('key', 'rules').maybeSingle()
   ]);
+  const { data: exRow } = await sb.from('settings').select('value').eq('key', 'pec_exclusions').maybeSingle();
+  state.pecEx = (exRow && exRow.value) || {};
   state.me = { ...profile, ...(staff || {}) };
   state.role = profile.role;
   state.rules = setting ? setting.value : {};
@@ -312,6 +324,12 @@ async function renderPerson(empId, back) {
           <button class="btn btn-primary" type="submit" style="width:auto">送出申請</button>
         </form></details>` : ''}
       ${pending ? '<div class="note">已有一筆審核中的申請。</div>' : ''}
+      ${pecEx(empId) ? `<div class="attention">醫策會不受理本院提報：${esc(pecEx(empId).reason)}（${esc(pecEx(empId).at)} 標記）。${own ? '如資料有誤，請洽師培中心。' : ''}</div>` : ''}
+      ${isAdmin() && certTrack ? (pecEx(empId)
+        ? `<button class="btn btn-ghost" type="button" onclick="togglePec('${esc(empId)}', true)">取消標記，恢復列入醫策會提報</button>`
+        : `<details class="apply"><summary class="btn btn-ghost" style="width:auto">標記為醫策會不受理（不列入提報）</summary>
+            <div class="inline-form"><label>原因<select id="pecReason"><option>執業登記不在本院</option><option>年資不符醫策會規定</option><option>醫策會退件（其他原因）</option></select></label>
+            <button class="btn btn-primary" style="width:auto" type="button" onclick="togglePec('${esc(empId)}', false)">確認標記</button></div></details>`) : ''}
     </section>`;
 
   // 下一步：把「現在該做什麼」放在結論之後、細節之前
@@ -443,7 +461,7 @@ async function renderList() {
     rows = [...rows].sort((a, b) => (ORDER[a.status_code] ?? 9) - (ORDER[b.status_code] ?? 9));
     $('fN').textContent = `${rows.length} / ${list.length} 人${rows.length > 300 ? '（顯示前 300 筆，請用搜尋縮小範圍）' : ''}`;
     $('tb').innerHTML = rows.slice(0, 300).map(r => `<tr>
-      <td><button class="btn-link" type="button" onclick="go('person','${esc(r.emp_id)}')">${empLabel(r.emp_id)}</button>${r.on_plan ? ' <span class="pill eligible" title="列入本年度追蹤名單">追蹤</span>' : ''}</td>
+      <td><button class="btn-link" type="button" onclick="go('person','${esc(r.emp_id)}')">${empLabel(r.emp_id)}</button>${pecTag(r.emp_id)}${r.on_plan ? ' <span class="pill eligible" title="列入本年度追蹤名單">追蹤</span>' : ''}</td>
       <td>${esc(r.dept)}</td><td>${esc(r.staff?.title || '')}</td><td>${esc(profGroup(r))}</td>
       <td class="num"><button class="btn-link" type="button" title="查看修課紀錄" onclick="showRecords('${esc(r.emp_id)}')">${esc(r.teach)}</button> / ${esc(r.need)}</td>
       <td><span class="pill ${esc(r.status_code)}">${esc(r.status)}</span>${r.valid_end ? `<br><small>至 ${esc(r.valid_end)}</small>` : ''}</td>
@@ -584,7 +602,9 @@ async function renderExpiry() {
   const monthKeys = [...new Set([refMonth, ...keys.filter(k => !k.startsWith('~'))])].sort();
   const bm = state.batchMonth && monthKeys.includes(state.batchMonth) ? state.batchMonth : refMonth;
   const kindOf = r => r.track_type === 'initial' ? '新增' : (r.grace === 'true' ? '展延（保留期內補足）' : '展延');
-  const batchRows = !batchOn ? [] : list.filter(r => r.can_apply && (r.track_type === 'initial' || r.grace === 'true' || (r.ve && r.ve.slice(0, 7) === bm)));
+  const batchAll = !batchOn ? [] : list.filter(r => r.can_apply && (r.track_type === 'initial' || r.grace === 'true' || (r.ve && r.ve.slice(0, 7) === bm)));
+  const batchRows = batchAll.filter(r => !pecEx(r.emp_id));
+  const batchSkipped = batchAll.filter(r => pecEx(r.emp_id));
   const bc = k => batchRows.filter(r => kindOf(r) === k).length;
   const monthName = k => `${Number(k.slice(0, 4)) - 1911} 年 ${Number(k.slice(5, 7))} 月`;
   const batchRef = `${bm}-28`;   // 效期自這個月的次月 1 日起算
@@ -596,6 +616,7 @@ async function renderExpiry() {
         <label style="margin:0;font-weight:700">月份 <select id="bMonth" style="display:inline-block;width:auto;margin:0 0 0 6px">${monthKeys.map(k => `<option value="${k}" ${k === bm ? 'selected' : ''}>${monthName(k)}</option>`).join('')}</select></label>
         <span class="num">共 <b>${batchRows.length}</b> 人：當月屆滿可展延 <b>${bc('展延')}</b>・保留期內已補足 <b>${bc('展延（保留期內補足）')}</b>・新增 <b>${bc('新增')}</b></span>
       </div>
+      ${batchSkipped.length ? `<div class="attention">已排除醫策會不受理 ${batchSkipped.length} 人：${batchSkipped.map(r => `${esc(r.emp_id)}（${esc(pecEx(r.emp_id).reason)}）`).join('、')}</div>` : ''}
       ${batchPeriod ? `<div class="note">提報效期：${batchPeriod.start}–${batchPeriod.end}（次月 1 日起整兩年）。已認證教師須在效期屆滿前 2 年內滿 8 點；新增須在 2 年內滿 10 點且年資達標。</div>` : ''}
       <div class="filters">
         <button class="btn btn-primary" style="width:auto" type="button" id="bPec" ${batchRows.length ? '' : 'disabled'}>下載醫策會上傳檔與核對清冊</button>
@@ -638,7 +659,7 @@ async function renderExpiry() {
   const rows = cur.rows.filter(r => !ex.group || profGroup(r) === ex.group)
     .sort((a, b) => Number(drop(b)) - Number(drop(a)) || Number(ready(a)) - Number(ready(b)) || a.emp_id.localeCompare(b.emp_id));
   const exportable = isAdmin() && mode !== 'new';
-  const canPick = exportable ? rows.filter(r => r.can_apply) : [];
+  const canPick = exportable ? rows.filter(r => r.can_apply && !pecEx(r.emp_id)) : [];
   const gap = r => {
     if (!r) return '—';
     const p = [];
@@ -665,7 +686,7 @@ async function renderExpiry() {
         ${other ? '<th>舊制點數</th><th>舊制</th><th>新制（基礎／進階）</th><th>新制</th>' : `<th>教學點數</th><th>缺口</th><th>狀態</th>${exportable ? '<th>提報效期</th>' : ''}`}</tr></thead><tbody>
       ${rows.slice(0, 500).map(r => { const o = other && other.get(r.emp_id); return `<tr class="${drop(r) ? 'row-drop' : ''}">
         <td>${canPick.length && r.can_apply ? `<input type="checkbox" class="pick" value="${esc(r.emp_id)}" ${ex.picked.has(r.emp_id) ? 'checked' : ''} aria-label="選取 ${esc(r.emp_id)}">` : ''}</td>
-        <td><button class="btn-link" type="button" onclick="go('person','${esc(r.emp_id)}')">${empLabel(r.emp_id)}</button></td>
+        <td><button class="btn-link" type="button" onclick="go('person','${esc(r.emp_id)}')">${empLabel(r.emp_id)}</button>${pecTag(r.emp_id)}</td>
         <td>${esc(r.dept)}</td><td>${esc(r.staff?.title || '')}</td><td>${esc(profGroup(r))}</td><td>${esc(r.valid_end || '—')}</td>
         ${other ? `<td class="num"><button class="btn-link" type="button" title="查看修課紀錄" onclick="showRecords('${esc(r.emp_id)}')">${esc(r.teach)}</button> / ${esc(r.need)}</td><td>${gap(r)}</td>
             <td class="num">${o ? `<b>${esc(o.basic)}</b>／<b>${esc(o.adv)}</b>` : '—'}</td><td>${gap(o)}</td>`
