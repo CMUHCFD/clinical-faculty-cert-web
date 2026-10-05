@@ -6,7 +6,7 @@
   <meta name="robots" content="noindex, nofollow">
   <title>臨床教師認證</title>
   <!-- 版本號用來避免瀏覽器沿用舊的快取檔；更新程式時一併更換 -->
-  <link rel="stylesheet" href="app.css?v=20261006a">
+  <link rel="stylesheet" href="app.css?v=20261006b">
 </head>
 <body>
 
@@ -23,14 +23,14 @@
       </div>
 
       <form id="loginForm" autocomplete="on">
-        <label>員工工號<input id="loginEmp" type="text" autocomplete="username" required></label>
+        <label>員工編號<input id="loginEmp" type="text" autocomplete="username" required></label>
         <label>密碼<input id="loginPw" type="password" autocomplete="current-password" required></label>
         <button class="btn btn-primary" type="submit">登入</button>
       </form>
 
       <form id="activateForm" hidden autocomplete="off">
         <p class="hint">第一次使用或忘記密碼：請輸入師培中心發給您的一次性開通碼，並自訂密碼。</p>
-        <label>員工工號<input id="actEmp" type="text" required></label>
+        <label>員工編號<input id="actEmp" type="text" required></label>
         <label>開通碼<input id="actCode" type="text" maxlength="8" required style="letter-spacing:.2em;text-transform:uppercase;"></label>
         <label>自訂密碼（至少 8 個字元）<input id="actPw" type="password" minlength="8" autocomplete="new-password" required></label>
         <label>再輸入一次<input id="actPw2" type="password" minlength="8" autocomplete="new-password" required></label>
@@ -39,7 +39,7 @@
 
       <form id="lookupForm" hidden autocomplete="off">
         <p class="hint">不用帳號，即可查詢自己的認證狀態、效期、點數與修課紀錄（唯讀）。</p>
-        <label>員工工號<input id="lkEmp" type="text" required></label>
+        <label>員工編號<input id="lkEmp" type="text" required></label>
         <label>身分證字號（或居留證號）最後 4 碼<input id="lkLast4" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" required autocomplete="off"></label>
         <button class="btn btn-primary" type="submit">查詢我的進度</button>
         <p class="hint">連續輸入錯誤 5 次會暫停查詢一段時間。</p>
@@ -71,12 +71,12 @@
       </div>
     </header>
     <main id="content" class="content"></main>
-    <footer class="foot">資料更新時間：<span id="asOf">—</span>。本站不存放姓名，以工號識別。</footer>
+    <footer class="foot">資料更新時間：<span id="asOf">—</span>。本站不存放姓名，以員工編號識別。</footer>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-  <script src="config.js?v=20261006a"></script>
-  <script src="app.js?v=20261006a"></script>
+  <script src="config.js?v=20261006b"></script>
+  <script src="app.js?v=20261006b"></script>
 </body>
 </html>

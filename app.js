@@ -58,7 +58,7 @@ $('tabLogin').onclick = () => setTab('login');
 $('tabActivate').onclick = () => setTab('activate');
 if ($('tabLookup')) $('tabLookup').onclick = () => setTab('lookup');
 
-// ---------- 免登入進度查詢：工號＋身分證後 4 碼 → 唯讀的個人頁 ----------
+// ---------- 免登入進度查詢：員工編號＋身分證後 4 碼 → 唯讀的個人頁 ----------
 if ($('lookupForm')) $('lookupForm').onsubmit = async e => {
   e.preventDefault();
   showAuth('查詢中…', true);
@@ -99,7 +99,7 @@ if ($('lkEnd')) $('lkEnd').onclick = endLookup;
 
 async function signIn(emp, password) {
   const { error } = await sb.auth.signInWithPassword({ email: emailOf(emp), password });
-  if (error) return showAuth('工號或密碼不正確。第一次使用請先以開通碼開通。');
+  if (error) return showAuth('員工編號或密碼不正確。第一次使用請先以開通碼開通。');
   await boot();
 }
 $('loginForm').onsubmit = e => { e.preventDefault(); signIn($('loginEmp').value, $('loginPw').value); };
@@ -203,7 +203,7 @@ async function showRecords(empId) {
   dlg.showModal();
   const { data, error } = await sb.from('course_records').select('course_title,course_date,category,teaching_hours,general_hours').eq('emp_id', empId).order('course_date', { ascending: false }).limit(500);
   dlg.innerHTML = `<div class="dlg-body">
-    <div class="dlg-head"><h3>修課紀錄｜工號 ${empLabel(empId)}　<small>${esc(info.dept || '')}・${esc(profGroup(info))}</small></h3><button class="btn btn-ghost" type="button" onclick="$('recDlg').close()">關閉</button></div>
+    <div class="dlg-head"><h3>修課紀錄｜員工編號 ${empLabel(empId)}　<small>${esc(info.dept || '')}・${esc(profGroup(info))}</small></h3><button class="btn btn-ghost" type="button" onclick="$('recDlg').close()">關閉</button></div>
     <div class="rule">${esc(info.status || '')}　系統採計教學點數 <b class="num">${esc(info.teach)}</b> / ${esc(info.need)}</div>
     ${error ? `<div class="empty">載入失敗：${esc(error.message)}</div>` : recordsTable(data, info, state.viewRef)}
     <div style="margin-top:10px"><button class="btn btn-ghost" type="button" onclick="$('recDlg').close();go('person','${esc(empId)}')">開啟這位同仁的完整頁面</button></div></div>`;
@@ -362,7 +362,7 @@ function personHTML(o) {
       <span class="tag ${d.regime === 'legacy' ? 'legacy' : ''}">目前適用：${esc(d.regimeLabel)}</span>
       <div class="status">${esc(d.status)}</div>
       <div class="rule">${esc(d.trackLabel)}</div>
-      <div class="rule">工號 ${o.lookup ? `${esc(empId)} <span class="nm">${esc(o.name || '')}</span>` : empLabel(empId)}｜${esc(staff?.dept || '')}｜${esc(staff?.title || '')}｜${esc(staff?.profession || '')}${cert ? `｜認證效期 ${esc(cert.valid_start_roc)}–${esc(cert.valid_end_roc)}` : ''}</div>
+      <div class="rule">員工編號 ${o.lookup ? `${esc(empId)} <span class="nm">${esc(o.name || '')}</span>` : empLabel(empId)}｜${esc(staff?.dept || '')}｜${esc(staff?.title || '')}｜${esc(staff?.profession || '')}${cert ? `｜認證效期 ${esc(cert.valid_start_roc)}–${esc(cert.valid_end_roc)}` : ''}</div>
       <div class="reason">${esc(d.statusReason)}</div>
       ${(d.recommendations || []).length ? `<ul class="recs">${d.recommendations.map(r => `<li>${esc(r)}</li>`).join('')}</ul>` : ''}
       ${certTrack && canAct && !pending && (o.regime === 'legacy' || o.role !== 'general') ? `<details class="apply"><summary class="btn ${d.initialEligible || d.renewalCompliant ? 'btn-primary' : 'btn-ghost'}" style="width:auto">${
@@ -496,12 +496,12 @@ async function renderList() {
   $('content').innerHTML = kpis + `
     <section class="card"><h3>人員名單</h3>
       <div class="filters">
-        <input id="fQ" type="search" placeholder="工號或單位">
+        <input id="fQ" type="search" placeholder="員工編號或單位">
         <select id="fS"><option value="">所有狀態</option><option value="can">可提報認證</option><option value="expiring">今年到期尚未符合</option><option value="valid">有效／達標</option><option value="deficient">尚未符合</option>${state.regime === 'legacy' ? '<option value="newgap">新制試算不符合</option>' : ''}</select>
         ${nameBtn()}
         <span id="fN" class="hint" style="align-self:center;margin:0"></span>
       </div>
-      <div class="table-wrap"><table><thead><tr><th>工號</th><th>單位</th><th>職稱</th><th>職類</th><th>教學點數</th><th>狀態</th><th>說明</th><th>${state.regime === 'legacy' ? '新制試算' : ''}</th></tr></thead><tbody id="tb"></tbody></table></div>
+      <div class="table-wrap"><table><thead><tr><th>員工編號</th><th>單位</th><th>職稱</th><th>職類</th><th>教學點數</th><th>狀態</th><th>說明</th><th>${state.regime === 'legacy' ? '新制試算' : ''}</th></tr></thead><tbody id="tb"></tbody></table></div>
     </section>`;
   const draw = () => {
     const q = $('fQ').value.trim().toLowerCase(), s = $('fS').value;
@@ -603,7 +603,7 @@ async function downloadPec(rows, ref, label, kindOf) {
       const who = roster.get(r.emp_id.toLowerCase()), p = r.period || certPeriod(r, ref), prof = PEC_NAME[r.staff?.profession] || r.staff?.profession;
       if (!who || !/^[A-Z][0-9A-Z]\d{8}$/.test(who.id)) return missing.push(r.emp_id);
       upload.push({ '姓名': who.name, '身分證字號': who.id, '職類': prof, '教師認證效期起日': p.start, '教師認證效期迄日': p.end, '取得認證機構代碼': general.pec_org_code || '157', '取得認證機構名稱': general.pec_org_name || '中國醫藥大學附設醫院' });
-      review.push({ '工號': r.emp_id, '姓名': who.name, '單位': r.dept, '職稱': r.staff?.title || '', '職類': prof, '申請別': kindOf(r), '教學能力提升點數': r.teach, '應達點數': r.need, '原效期迄日': r.valid_end || '', '提報效期起日': p.start, '提報效期迄日': p.end });
+      review.push({ '員工編號': r.emp_id, '姓名': who.name, '單位': r.dept, '職稱': r.staff?.title || '', '職類': prof, '申請別': kindOf(r), '教學能力提升點數': r.teach, '應達點數': r.need, '原效期迄日': r.valid_end || '', '提報效期起日': p.start, '提報效期迄日': p.end });
     });
     if (!upload.length) throw new Error('名冊中找不到這些人員的資料');
     const stamp = today().replace(/-/g, '');
@@ -673,7 +673,7 @@ async function renderExpiry() {
       ${batchPeriod ? `<div class="note">提報效期：${batchPeriod.start}–${batchPeriod.end}（次月 1 日起整兩年）。已認證教師須在效期屆滿前 2 年內滿 8 點；新增須在 2 年內滿 10 點且年資達標。</div>` : ''}
       <div class="filters">
         <button class="btn btn-primary" style="width:auto" type="button" id="bPec" ${batchRows.length ? '' : 'disabled'}>下載醫策會上傳檔與核對清冊</button>
-        <button class="btn btn-ghost" type="button" id="bCsv" ${batchRows.length ? '' : 'disabled'}>下載名單（僅工號）</button>
+        <button class="btn btn-ghost" type="button" id="bCsv" ${batchRows.length ? '' : 'disabled'}>下載名單（僅員工編號）</button>
       </div>
       <div class="note">上傳檔需要姓名與身分證字號：按下後請選擇您電腦上的員工名冊（user….xlsx）。名冊只在這個瀏覽器分頁內讀取，不會上傳到任何地方。</div>
     </section>`;
@@ -681,7 +681,7 @@ async function renderExpiry() {
     if (!batchOn) return;
     $('bMonth').onchange = e => { state.batchMonth = e.target.value; renderExpiry(); };
     $('bPec').onclick = () => downloadPec(state.batch.rows, state.batch.ref, state.batch.label, state.batch.kindOf);
-    $('bCsv').onclick = () => download(`${state.batch.label}_名單_${today().replace(/-/g, '')}.csv`, [['工號', '單位', '職稱', '職類', '申請別', '教學點數', '應達點數', '原效期迄日', '提報效期起日', '提報效期迄日'],
+    $('bCsv').onclick = () => download(`${state.batch.label}_名單_${today().replace(/-/g, '')}.csv`, [['員工編號', '單位', '職稱', '職類', '申請別', '教學點數', '應達點數', '原效期迄日', '提報效期起日', '提報效期迄日'],
       ...state.batch.rows.map(r => { const p = certPeriod(r, state.batch.ref); return [r.emp_id, r.dept, r.staff?.title, profGroup(r), kindOf(r), r.teach, r.need, r.valid_end, p.start, p.end]; })]);
   };
   if (!keys.length) { $('content').innerHTML = modeBar + batchCard; wireBatch(); if (!batchCard) $('content').innerHTML += '<div class="card empty">目前沒有即將到期或可提報的人員。</div>'; return; }
@@ -737,7 +737,7 @@ async function renderExpiry() {
         <span class="hint" id="pickN" style="align-self:center;margin:0"></span>
       </div>
 
-      <div class="table-wrap"><table><thead><tr><th></th><th>工號</th><th>單位</th><th>職稱</th><th>職類</th><th>效期迄日</th>
+      <div class="table-wrap"><table><thead><tr><th></th><th>員工編號</th><th>單位</th><th>職稱</th><th>職類</th><th>效期迄日</th>
         ${other ? '<th>舊制點數</th><th>舊制</th><th>新制（基礎／進階）</th><th>新制</th>' : `<th>教學點數</th><th>缺口</th><th>狀態</th>${exportable ? '<th>提報效期</th>' : ''}`}</tr></thead><tbody>
       ${rows.slice(0, 500).map(r => { const o = other && other.get(r.emp_id); return `<tr class="${drop(r) ? 'row-drop' : ''}">
         <td>${canPick.length && r.can_apply ? `<input type="checkbox" class="pick" value="${esc(r.emp_id)}" ${ex.picked.has(r.emp_id) ? 'checked' : ''} aria-label="選取 ${esc(r.emp_id)}">` : ''}</td>
@@ -775,9 +775,9 @@ async function renderExpiry() {
     downloadPec(sel, refDate, '自選名單', kindOf);
   };
   $('listBtn').onclick = () => download(`${cur.label}_${mode === 'both' ? '新舊比較' : mode === 'new' ? '新制試算' : mode === 'cutoff' ? '基準日' + cutoff.replace(/-/g, '') : '名單'}_${today().replace(/-/g, '')}.csv`,
-    other ? [['工號', '單位', '職稱', '職類', '效期迄日', '舊制教學點數', '舊制應達', '舊制狀態', '新制基礎', '新制進階', '新制狀態', '新制說明', '舊制達標但新制不符'],
+    other ? [['員工編號', '單位', '職稱', '職類', '效期迄日', '舊制教學點數', '舊制應達', '舊制狀態', '新制基礎', '新制進階', '新制狀態', '新制說明', '舊制達標但新制不符'],
         ...rows.map(r => { const o = other.get(r.emp_id) || {}; return [r.emp_id, r.dept, r.staff?.title, profGroup(r), r.valid_end, r.teach, r.need, r.status, o.basic, o.adv, o.status, o.reason, drop(r) ? '是' : '']; })]
-      : [['工號', '單位', '職稱', '職類', '效期迄日', '教學點數', '應達點數', '尚缺', '狀態', '說明'],
+      : [['員工編號', '單位', '職稱', '職類', '效期迄日', '教學點數', '應達點數', '尚缺', '狀態', '說明'],
         ...rows.map(r => [r.emp_id, r.dept, r.staff?.title, profGroup(r), r.valid_end, r.teach, r.need, r.gap_t, r.status, r.reason])]);
   sync();
 }
@@ -911,7 +911,7 @@ async function renderReview() {
     <div class="note">新制由科部主管提報、您審查核准；核准後在這裡整理成醫策會上傳檔。按下後請選擇您電腦上的員工名冊（只在瀏覽器內讀取，不會上傳）。</div></section>`;
   $('content').innerHTML = approvedCard + `<section class="card"><h3>認證申請（${apps.filter(a => a.status === '審核中').length} 件待審）</h3>
     <div class="note">核准後系統會寫入認證效期並重新計算該員狀態；提報醫策會 PEC 平台仍需在您的電腦上產生提報檔（雲端沒有身分證字號）。</div>
-    <div class="table-wrap"><table><thead><tr><th>工號</th><th>申請</th><th>系統檢核</th><th>審查</th></tr></thead><tbody>
+    <div class="table-wrap"><table><thead><tr><th>員工編號</th><th>申請</th><th>系統檢核</th><th>審查</th></tr></thead><tbody>
     ${apps.map(row).join('') || '<tr><td colspan="4" class="empty">目前沒有申請</td></tr>'}</tbody></table></div></section>`;
   if ($('amSel')) $('amSel').onchange = e => { state.approvedMonth = e.target.value; renderReview(); };
 }
@@ -936,7 +936,7 @@ async function renderRoster() {
     </section>
     <section class="card"><h3>提報 ${year} 年度應完成臨床教師訓練的人員</h3>
       <form id="rosterForm" class="inline-form">
-        <label>工號<input id="rEmp" required></label>
+        <label>員工編號<input id="rEmp" required></label>
         <label>類別<select id="rType"><option>初次認證培訓</option><option>效期展延列管</option></select></label>
         <label>狀態<select id="rStatus"><option>在職列管</option><option>離職</option><option>留職停薪</option><option>職務異動</option></select></label>
         <label>備註<input id="rNotes"></label>
@@ -944,7 +944,7 @@ async function renderRoster() {
       </form>
       <div class="note">認證率的分母以各職類年度訓練計畫所列人員為準；離職、留停、職務異動者改狀態即可，不必刪除，會另行列示。</div></section>
     <section class="card"><h3>${year} 年度追蹤名單（${rows.length} 人）</h3><div class="table-wrap"><table>
-      <thead><tr><th>工號</th><th>單位</th><th>職類</th><th>類別</th><th>列管狀態</th><th>目前認證狀態</th><th>備註</th><th></th></tr></thead><tbody>
+      <thead><tr><th>員工編號</th><th>單位</th><th>職類</th><th>類別</th><th>列管狀態</th><th>目前認證狀態</th><th>備註</th><th></th></tr></thead><tbody>
       ${rows.map(r => `<tr><td><button class="btn-link" type="button" onclick="go('person','${esc(r.emp_id)}')">${empLabel(r.emp_id)}</button></td>
         <td>${esc(r.staff?.dept || '')}</td><td>${esc(r.staff?.profession || '')}</td><td>${esc(r.monitor_type || '')}</td>
         <td><span class="pill ${r.status === '在職列管' ? 'valid' : ''}">${esc(r.status)}</span></td>
@@ -972,17 +972,17 @@ async function renderAdmin() {
 
     <section class="card"><h3>發開通碼</h3>
       <form id="codeForm" class="inline-form">
-        <label>工號（可多個，以空白或逗號分隔）<input id="kIds" placeholder="例如 104343 M21742"></label>
+        <label>員工編號（可多個，以空白或逗號分隔）<input id="kIds" placeholder="例如 104343 M21742"></label>
         <label>或：單位名稱開頭<input id="kDept" placeholder="例如 藥劑部"></label>
         <label class="check"><input id="kRe" type="checkbox"> 已開通者也重發（重設密碼用）</label>
         <button class="btn btn-primary" style="width:auto" type="submit">產生</button>
       </form>
       <div id="codeOut"></div>
-      <div class="note">開通碼只顯示這一次，雲端只保存雜湊。14 天內有效，連續輸錯 5 次失效。本站沒有姓名，請依工號發放。</div></section>
+      <div class="note">開通碼只顯示這一次，雲端只保存雜湊。14 天內有效，連續輸錯 5 次失效。本站沒有姓名，請依員工編號發放。</div></section>
 
     <section class="card"><h3>授權角色</h3>
       <form id="roleForm" class="inline-form">
-        <label>工號<input id="gEmp" required></label>
+        <label>員工編號<input id="gEmp" required></label>
         <label>角色<select id="gRole"><option value="general">一般人員</option><option value="dept_coordinator">科部主管</option><option value="admin">師培中心管理者</option><option value="super_admin">最高管理者</option></select></label>
         <label>科部主管的授權範圍（單位名稱開頭；留空＝本人所屬單位）<input id="gScope"></label>
         <label class="check"><input id="gOff" type="checkbox"> 停用此帳號</label>
@@ -990,7 +990,7 @@ async function renderAdmin() {
       </form></section>
 
     <section class="card"><h3>已開通帳號（${accounts.length}）</h3><div class="table-wrap"><table>
-      <thead><tr><th>工號</th><th>角色</th><th>授權範圍</th><th>狀態</th><th>開通時間</th></tr></thead><tbody>
+      <thead><tr><th>員工編號</th><th>角色</th><th>授權範圍</th><th>狀態</th><th>開通時間</th></tr></thead><tbody>
       ${accounts.map(a => `<tr><td>${esc(a.emp_id)}</td><td>${esc(ROLE_LABEL[a.role])}</td><td>${esc(a.scope_dept || '—')}</td><td>${a.disabled ? '<span class="pill expired">停用</span>' : '<span class="pill valid">使用中</span>'}</td><td>${esc(fmtTime(a.created_at))}</td></tr>`).join('')}
       </tbody></table></div></section>`;
 
@@ -998,10 +998,10 @@ async function renderAdmin() {
     e.preventDefault();
     const d = await act('admin.issueCodes', { emp_ids: $('kIds').value.split(/[\s,，、]+/).filter(Boolean), dept: $('kDept').value.trim(), reissue: $('kRe').checked });
     if (!d) return;
-    const csv = '﻿工號,單位,開通碼,類型,有效至\n' + d.codes.map(c => [c.emp_id, c.dept, c.code, c.kind, d.expires.slice(0, 10)].join(',')).join('\n');
+    const csv = '﻿員工編號,單位,開通碼,類型,有效至\n' + d.codes.map(c => [c.emp_id, c.dept, c.code, c.kind, d.expires.slice(0, 10)].join(',')).join('\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
     $('codeOut').innerHTML = `<p><a class="btn btn-ghost" href="${url}" download="開通碼_${today()}.csv">下載 CSV（${d.codes.length} 筆）</a></p>
-      <div class="table-wrap"><table><thead><tr><th>工號</th><th>單位</th><th>開通碼</th><th>類型</th></tr></thead><tbody>
+      <div class="table-wrap"><table><thead><tr><th>員工編號</th><th>單位</th><th>開通碼</th><th>類型</th></tr></thead><tbody>
       ${d.codes.slice(0, 50).map(c => `<tr><td>${esc(c.emp_id)}</td><td>${esc(c.dept)}</td><td><code>${esc(c.code)}</code></td><td>${esc(c.kind)}</td></tr>`).join('')}</tbody></table></div>
       ${d.codes.length > 50 ? '<div class="note">畫面只列前 50 筆，完整清單請下載 CSV。</div>' : ''}`;
   };
