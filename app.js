@@ -82,13 +82,117 @@ function showLookup(r) {
   const how = r.regime === 'new'
     ? '新制的臨床教師認證由科部主管統一提報，符合資格者不需要自行申請。'
     : '符合資格者請登入系統，在「我的認證」按「申請臨床教師認證」。';
-  // 結論（個人頁）放最前面，使用說明放最後
-  $('lkContent').innerHTML = personHTML({ empId: r.emp_id, own: true, lookup: true, name: r.name, row: r.row, staff: r.staff, records: r.records,
-      apps: r.apps, upcoming: r.upcoming, myRegs: [], regime: r.regime, role: 'general', admin: false, canAct: false }) +
+  // 結論放最前面，使用說明放最後
+  $('lkContent').innerHTML = lookupHTML(r) +
     `<section class="card lk-note"><b>這是免登入的唯讀查詢。</b>${how}要報名課程或申請，請先登入；還沒有帳號者，請向科部主管或師培中心索取開通碼。
       <br><small>為保護個資，查詢畫面 10 分鐘後會自動關閉；使用公用電腦時，看完請按右上角「結束查詢」。</small></section>`;
   clearTimeout(state.lkTimer); state.lkTimer = setTimeout(endLookup, 10 * 60e3);
   window.scrollTo(0, 0);
+}
+// 免登入查詢的版面（CTML：結論 → 三個關鍵數字 → 下一步 → 依年度分段的明細）
+//   字級放大、顏色只用來表示狀態；明細依年度收合，年度內再分「教學能力提升」與「一般／院內課程」
+function lookupHTML(r) {
+  const d = r.row[r.regime === 'new' ? 'detail_new' : 'detail'] || r.row.detail;
+  const cert = d.activeCertificate;
+  const certTrack = d.trackType === 'initial' || d.trackType === 'renewal';
+  const plain = s => String(s || '').replace(/^[^\p{L}\p{N}]+/u, '');      // 去掉狀態前面的色點符號，改用色塊表示
+  const n = v => Math.round((Number(v) || 0) * 10) / 10;
+
+  // ---- 三個關鍵數字：效期、點數、還差多少
+  let validity;
+  if (cert) {
+    const end = new Date(cert.valid_end), now = new Date(today());
+    const months = (end.getFullYear() - now.getFullYear()) * 12 + end.getMonth() - now.getMonth();
+    validity = `<div class="lk-big">${esc(cert.valid_start_roc)}<span class="lk-to">至</span>${esc(cert.valid_end_roc)}</div>
+      <div class="lk-sub">${months < 0 ? '已屆滿' : months <= 6 ? `<b class="warn">剩 ${months} 個月到期</b>` : `還有 ${months} 個月`}</div>`;
+  } else if (certTrack) {
+    validity = `<div class="lk-big muted">尚未取得</div><div class="lk-sub">${d.lastCertificate ? `上一張效期至 ${esc(d.lastCertificate.valid_end_roc || d.lastCertificate.valid_end)}` : '目前沒有有效的臨床教師認證'}</div>`;
+  } else {
+    validity = `<div class="lk-big muted">不適用</div><div class="lk-sub">${esc(d.trackLabel || '適用每年師培時數規範')}</div>`;
+  }
+  const have = certTrack ? d.teachingHours : d.totalHours, need = d.requiredTotalHours;
+  const pct = need ? Math.min(100, (Number(have) || 0) / need * 100) : 100;
+  const pointsTile = `<div class="lk-big">${n(have)}<span class="lk-of"> / ${n(need)} 點</span></div>
+    <div class="lk-bar"><i style="width:${pct}%" class="${pct >= 100 ? 'ok' : ''}"></i></div>
+    <div class="lk-sub">${certTrack ? '教學能力提升' : '年度總點數'}・${esc(d.window?.label || '')}</div>`;
+
+  const gaps = [];
+  if ((d.missingBasicItems || []).length) gaps.push(`基礎項目還缺：${d.missingBasicItems.join('、')}`);
+  if (d.gapBasicHours > 0) gaps.push(`基礎課程還差 ${n(d.gapBasicHours)} 點`);
+  if (d.gapAdvancedHours > 0) gaps.push(`進階課程還差 ${n(d.gapAdvancedHours)} 點`);
+  if (!gaps.length && d.gapTotal > 0) gaps.push(`${certTrack ? '教學能力提升' : '總點數'}還差 ${n(d.gapTotal)} 點`);
+  if (!certTrack && d.gapTeaching > 0 && d.gapTotal > d.gapTeaching) gaps.push(`其中教學能力提升至少 ${n(d.gapTeaching)} 點`);
+  if (certTrack && d.trackType === 'initial' && d.seniorityMet === false) gaps.push(`年資未達 ${d.requiredSeniority} 年（目前 ${d.seniority} 年）`);
+  const eligible = certTrack && (d.initialEligible || d.renewalCompliant);
+  const pending = (r.apps || []).some(a => a.status === '審核中');
+  const gapTile = eligible || pending || !gaps.length
+    ? `<div class="lk-big ok">${pending ? '審核中' : eligible ? '可以認證' : '已達標'}</div><div class="lk-sub">${pending ? '師培中心審查中' : eligible ? '已符合資格' : '目前不需要補修'}</div>`
+    : `<div class="lk-big warn">${d.gapTotal > 0 ? `${n(d.gapTotal)} 點` : `${gaps.length} 項`}</div><div class="lk-sub">${esc(gaps[0])}</div>`;
+
+  const hero = `<section class="card lk-hero tone-${esc(d.statusCode)}">
+      <div class="lk-who">${esc(r.name || '')}<small>${esc(r.emp_id)}｜${esc(r.staff?.dept || '')}｜${esc(r.staff?.profession || '')}</small></div>
+      <div class="lk-status">${esc(plain(d.status))}</div>
+      <div class="lk-reason">${esc(d.statusReason || '')}</div>
+      <span class="tag ${d.regime === 'legacy' ? 'legacy' : ''}">適用：${esc(d.regimeLabel || '')}</span>
+    </section>
+    <section class="lk-tiles">
+      <div class="card lk-tile"><h3>認證效期</h3>${validity}</div>
+      <div class="card lk-tile"><h3>目前點數</h3>${pointsTile}</div>
+      <div class="card lk-tile"><h3>${eligible || pending || !gaps.length ? '結果' : '還差'}</h3>${gapTile}</div>
+    </section>`;
+
+  // ---- 下一步
+  let nextBody;
+  if (pending) nextBody = '<p>您的認證申請正在審核中，暫時不需要其他動作。</p>';
+  else if (eligible) nextBody = `<p><b>您已符合資格。</b>${r.regime === 'new'
+    ? '新制的認證由科部主管統一提報，您不需要自行申請；主管送出後，師培中心會協助您完成認證。'
+    : '請登入本系統，在「我的認證」按「申請臨床教師認證」，由師培中心審查。'}</p>`;
+  else if (!gaps.length) nextBody = `<p>目前不需要補修。${cert ? `請留意效期 ${esc(cert.valid_end_roc)}。` : ''}</p>`;
+  else nextBody = `<ul class="lk-gaps">${gaps.map(g => `<li>${esc(g)}</li>`).join('')}</ul>
+    <p class="lk-sub">${cert ? `請在 ${esc(cert.valid_end_roc)} 前完成。` : certTrack ? '' : '請在今年 12 月 31 日前完成。'}可報名的課程請登入後到「課程」頁查看。</p>`;
+  const next = `<section class="card next lk-next"><h3>下一步</h3>${nextBody}</section>`;
+
+  // ---- 新制試算（目前仍為舊制時）
+  const p = r.regime === 'legacy' ? d.newRulePreview : null;
+  const preview = !p ? '' : `<section class="card preview ${p.wouldQualify ? 'ok' : ''}"><h3>${p.appliesFrom} 年起改採新制時</h3>
+    ${p.wouldQualify ? '<p>以目前的修課紀錄，新制下也符合，不需額外補修。</p>' : `<ul class="lk-gaps">
+      ${(p.missingBasicItems || []).length ? `<li>基礎項目還缺：${esc(p.missingBasicItems.join('、'))}</li>` : ''}
+      ${p.gapBasicHours > 0 ? `<li>基礎還差 ${n(p.gapBasicHours)} 點</li>` : ''}${p.gapAdvancedHours > 0 ? `<li>進階還差 ${n(p.gapAdvancedHours)} 點</li>` : ''}</ul>`}</section>`;
+
+  // ---- 各年度的課程明細：年度收合 → 教學能力提升／一般課程
+  const inWin = inWindowFn({ track_type: d.trackType, rg: d.regime, ve: cert && cert.valid_end, le: d.lastCertificate && d.lastCertificate.valid_end,
+    grace: d.renewal && d.renewal.inGrace, wy: d.window && d.window.years });
+  const tagOf = cat => /基礎/.test(cat) || BASIC.some(b => cat.includes(b)) ? '基礎' : /進階/.test(cat) || ADVANCED.some(a => cat.includes(a)) ? '進階' : '';
+  const byYear = new Map();
+  (r.records || []).forEach(x => { const y = x.course_date.slice(0, 4); byYear.set(y, [...(byYear.get(y) || []), x]); });
+  const line = (x, teach) => {
+    const hit = teach && certTrack ? inWin(x.course_date) : false, tag = teach ? tagOf(x.category || '') : '';
+    return `<li class="${hit ? 'hit' : ''}"><span class="lk-date">${Number(x.course_date.slice(5, 7))}/${Number(x.course_date.slice(8, 10))}</span>
+      <span class="lk-title">${esc(x.course_title)}${tag ? ` <span class="pill ${tag === '基礎' ? 'eligible' : 'valid'}">${tag}</span>` : ''}${!teach && x.category ? ` <small>${esc(x.category)}</small>` : ''}${hit ? ' <span class="done">計入</span>' : ''}</span>
+      <span class="lk-h">${n(teach ? x.teaching_hours : x.general_hours)}</span></li>`;
+  };
+  const years = [...byYear.keys()].sort().reverse();
+  const yearBlocks = years.map((y, i) => {
+    const list = byYear.get(y);
+    const teach = list.filter(x => Number(x.teaching_hours) > 0), gen = list.filter(x => !(Number(x.teaching_hours) > 0));
+    const sumT = n(teach.reduce((a, x) => a + Number(x.teaching_hours), 0)), sumG = n(gen.reduce((a, x) => a + Number(x.general_hours), 0));
+    const counted = certTrack && teach.some(x => inWin(x.course_date));
+    return `<details class="lk-year" ${i === 0 ? 'open' : ''}>
+      <summary><span class="lk-yr">${Number(y) - 1911} 年</span>
+        <span class="lk-chips"><span class="lk-chip t">教學能力提升 <b>${sumT}</b> 點</span><span class="lk-chip">一般 <b>${sumG}</b> 點</span><span class="lk-chip">${list.length} 門課</span>${counted ? '<span class="lk-chip in">計入本次採計</span>' : ''}</span></summary>
+      ${teach.length ? `<div class="lk-group">教學能力提升（${teach.length} 門，${sumT} 點）</div><ul class="lk-list">${teach.map(x => line(x, true)).join('')}</ul>` : ''}
+      ${gen.length ? `<div class="lk-group g">一般醫學／院內課程（${gen.length} 門，${sumG} 點）</div><ul class="lk-list">${gen.map(x => line(x, false)).join('')}</ul>` : ''}
+    </details>`;
+  }).join('');
+  const detail = `<section class="card"><h3>各年度修課明細</h3>
+    <p class="lk-sub">點年度可展開或收合。綠底「計入」是算進本次認證點數的課程。線上課程每年最多採認 1 點，所以合計可能略高於系統採計的點數。</p>
+    ${yearBlocks || '<div class="empty">沒有修課紀錄</div>'}</section>`;
+
+  const apps = !(r.apps || []).length ? '' : `<section class="card"><h3>認證申請紀錄</h3><ul class="lk-list">
+    ${r.apps.map(a => `<li><span class="lk-date">${esc(fmtTime(a.submitted_at).split(' ')[0])}</span><span class="lk-title">${esc(a.app_type)}${a.valid_start ? `<small>核定效期 ${esc(a.valid_start)}～${esc(a.valid_end)}</small>` : ''}</span>
+      <span class="pill ${a.status === '已通過' ? 'valid' : a.status === '審核中' ? 'expiring' : 'expired'}">${esc(a.status)}</span></li>`).join('')}</ul></section>`;
+
+  return `<div class="lk">${hero}${next}${detail}${preview}${apps}</div>`;
 }
 function endLookup() {
   clearTimeout(state.lkTimer);

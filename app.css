@@ -47,6 +47,52 @@ form input { display: block; width: 100%; margin-top: 4px; padding: 10px 12px; b
 .who .btn-ghost { color: #fff; border-color: rgba(255,255,255,.4); }
 #lookupView .brand { flex: 1; }   /* 免登入查詢沒有選單，把「結束查詢」推到右側 */
 .lk-note { border-left: 4px solid var(--secondary); font-size: 14px; line-height: 1.7; }
+
+/* 免登入查詢：大字、一目了然 */
+.lk { display: grid; gap: 16px; font-size: 16px; min-width: 0; }
+.lk h3 { font-size: 15px; color: var(--muted); margin: 0 0 6px; }
+.lk-hero { border-left: 10px solid var(--tone, var(--mist)); padding: 20px; }
+.lk-who { font-size: 20px; font-weight: 800; color: var(--primary-dark); }
+.lk-who small { display: block; font-size: 14px; font-weight: 400; color: var(--muted); margin-top: 2px; }
+.lk-status { font-size: 30px; font-weight: 800; line-height: 1.25; margin: 10px 0 6px; color: var(--primary-dark); }
+.lk-reason { font-size: 16px; margin-bottom: 10px; }
+.lk-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.lk-tile { padding: 16px 18px; }
+.lk-big { font-size: 30px; font-weight: 800; line-height: 1.2; color: var(--primary-dark); font-variant-numeric: tabular-nums; word-break: keep-all; }
+.lk-big.ok { color: #2b7a6b; } .lk-big.warn { color: #b3261e; } .lk-big.muted { color: var(--mist); }
+.lk-to { font-size: 15px; font-weight: 400; color: var(--muted); margin: 0 6px; }
+.lk-of { font-size: 18px; font-weight: 700; color: var(--muted); }
+.lk-sub { font-size: 14px; color: var(--muted); margin-top: 6px; }
+.lk-sub .warn, b.warn { color: #b3261e; }
+.lk-bar { height: 12px; background: #e8edf0; border-radius: 6px; overflow: hidden; margin-top: 10px; }
+.lk-bar i { display: block; height: 100%; background: var(--secondary); border-radius: 6px; }
+.lk-bar i.ok { background: var(--success); }
+.lk-next p, .lk-gaps { font-size: 17px; }
+.lk-gaps { margin: 4px 0; padding-left: 22px; } .lk-gaps li { margin: 4px 0; font-weight: 700; }
+.lk-year { border: 1px solid var(--line); border-radius: 10px; margin-top: 10px; overflow: hidden; }
+.lk-year > summary { cursor: pointer; padding: 12px 14px; background: var(--bg); display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; list-style: none; }
+.lk-year > summary::-webkit-details-marker { display: none; }
+.lk-year > summary::before { content: '▸'; color: var(--muted); }
+.lk-year[open] > summary::before { content: '▾'; }
+.lk-yr { font-size: 20px; font-weight: 800; color: var(--primary-dark); }
+.lk-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.lk-chip { font-size: 13.5px; background: #fff; border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; }
+.lk-chip b { font-size: 15px; } .lk-chip.t { border-color: var(--secondary); color: var(--primary); }
+.lk-chip.in { background: #EDF8F6; border-color: var(--success); color: #2b7a6b; font-weight: 700; }
+.lk-group { font-size: 14px; font-weight: 800; color: var(--primary); padding: 10px 14px 4px; }
+.lk-group.g { color: var(--muted); }
+.lk-list { list-style: none; margin: 0; padding: 0 6px 8px; }
+.lk-list li { display: flex; gap: 12px; align-items: baseline; padding: 9px 8px; border-bottom: 1px solid var(--line); }
+.lk-list li:last-child { border-bottom: 0; }
+.lk-list li.hit { background: #EDF8F6; border-radius: 6px; }
+.lk-date { flex: 0 0 3.2em; color: var(--muted); font-variant-numeric: tabular-nums; font-size: 14px; }
+.lk-title { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.lk-title small { display: block; color: var(--muted); font-size: 12.5px; }
+.lk-h { flex: 0 0 auto; font-weight: 800; font-size: 17px; font-variant-numeric: tabular-nums; }
+@media (max-width: 480px) {
+  .lk-status { font-size: 25px; } .lk-big { font-size: 26px; }
+  .lk-tiles { gap: 8px; } .lk-tile { padding: 12px 14px; } .lk-tile h3 { margin-bottom: 2px; }
+}
 .content { max-width: 1080px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
 .content > * { min-width: 0; }   /* 讓寬表格在卡片內捲動，不把整頁撐寬 */
 .foot { max-width: 1080px; margin: 0 auto; padding: 8px 16px 32px; font-size: 12px; color: var(--muted); }
