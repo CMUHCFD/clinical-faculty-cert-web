@@ -49,12 +49,53 @@ function showAuth(msg, ok) {
   $('appView').hidden = true; $('authView').hidden = false;
   $('authMsg').textContent = msg || ''; $('authMsg').className = 'msg' + (ok ? ' ok' : '');
 }
-function setTab(activate) {
-  $('tabLogin').classList.toggle('is-active', !activate); $('tabActivate').classList.toggle('is-active', activate);
-  $('loginForm').hidden = activate; $('activateForm').hidden = !activate; $('authMsg').textContent = '';
+function setTab(which) {
+  const tabs = { login: ['tabLogin', 'loginForm'], activate: ['tabActivate', 'activateForm'], lookup: ['tabLookup', 'lookupForm'] };
+  Object.entries(tabs).forEach(([k, [t, f]]) => { if (!$(t) || !$(f)) return; $(t).classList.toggle('is-active', k === which); $(f).hidden = k !== which; });
+  $('authMsg').textContent = '';
 }
-$('tabLogin').onclick = () => setTab(false);
-$('tabActivate').onclick = () => setTab(true);
+$('tabLogin').onclick = () => setTab('login');
+$('tabActivate').onclick = () => setTab('activate');
+if ($('tabLookup')) $('tabLookup').onclick = () => setTab('lookup');
+
+// ---------- 免登入進度查詢：工號＋身分證後 4 碼 → 唯讀的個人頁 ----------
+if ($('lookupForm')) $('lookupForm').onsubmit = async e => {
+  e.preventDefault();
+  showAuth('查詢中…', true);
+  try {
+    const res = await fetch(`${window.APP_CONFIG.url}/functions/v1/lookup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: window.APP_CONFIG.anonKey, Authorization: `Bearer ${window.APP_CONFIG.anonKey}` },
+      body: JSON.stringify({ emp_id: $('lkEmp').value.trim(), last4: $('lkLast4').value.trim() })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!data.success) return showAuth(data.message || '查詢失敗，請稍後再試。');
+    showLookup(data);
+  } catch (err) { showAuth('無法連線到查詢服務，請稍後再試。'); }
+};
+function showLookup(r) {
+  $('lookupForm').reset(); $('authMsg').textContent = '';
+  $('content').innerHTML = '';                        // 避免與先前登入者的頁面重複
+  $('authView').hidden = true; $('appView').hidden = true; $('lookupView').hidden = false;
+  $('lkWho').textContent = `${r.emp_id} ${r.name || ''}`;
+  $('lkAsOf').textContent = fmtTime(r.row.computed_at);
+  const how = r.regime === 'new'
+    ? '新制的臨床教師認證由科部主管統一提報，符合資格者不需要自行申請。'
+    : '符合資格者請登入系統，在「我的認證」按「申請臨床教師認證」。';
+  // 結論（個人頁）放最前面，使用說明放最後
+  $('lkContent').innerHTML = personHTML({ empId: r.emp_id, own: true, lookup: true, name: r.name, row: r.row, staff: r.staff, records: r.records,
+      apps: r.apps, upcoming: r.upcoming, myRegs: [], regime: r.regime, role: 'general', admin: false, canAct: false }) +
+    `<section class="card lk-note"><b>這是免登入的唯讀查詢。</b>${how}要報名課程或申請，請先登入；還沒有帳號者，請向科部主管或師培中心索取開通碼。
+      <br><small>為保護個資，查詢畫面 10 分鐘後會自動關閉；使用公用電腦時，看完請按右上角「結束查詢」。</small></section>`;
+  clearTimeout(state.lkTimer); state.lkTimer = setTimeout(endLookup, 10 * 60e3);
+  window.scrollTo(0, 0);
+}
+function endLookup() {
+  clearTimeout(state.lkTimer);
+  $('lkContent').innerHTML = ''; $('lkWho').textContent = '';
+  $('lookupView').hidden = true; $('authView').hidden = false; setTab('lookup');
+}
+if ($('lkEnd')) $('lkEnd').onclick = endLookup;
 
 async function signIn(emp, password) {
   const { error } = await sb.auth.signInWithPassword({ email: emailOf(emp), password });
@@ -79,7 +120,7 @@ $('activateForm').onsubmit = async e => {
     await signIn(emp, pw);
   } catch (err) { showAuth('無法連線到開通服務，請稍後再試。'); }
 };
-$('logoutBtn').onclick = async () => { await sb.auth.signOut(); state.me = null; state.roster = null; showAuth(); };
+$('logoutBtn').onclick = async () => { await sb.auth.signOut(); state.me = null; state.roster = null; $('content').innerHTML = ''; showAuth(); };
 if ($('pwBtn')) $('pwBtn').onclick = () => {   // 頁面快取尚未更新時可能還沒有這顆按鈕
   let dlg = $('pwDlg');
   if (!dlg) { dlg = document.createElement('dialog'); dlg.id = 'pwDlg'; dlg.className = 'small-dlg'; document.body.appendChild(dlg); }
@@ -223,7 +264,7 @@ const loadNewRegimeList = () => loadAltList('detail_new');
 
 async function boot() {
   const { data: { session } } = await sb.auth.getSession();
-  if (!session) return showAuth();
+  if (!session) { if (location.hash === '#lookup') setTab('lookup'); return showAuth(); }
   state.list = null;   // 換帳號登入時不得沿用上一位的名單
   const { data: profile } = await sb.from('profiles').select('emp_id,role,scope_dept,disabled').eq('user_id', session.user.id).maybeSingle();
   if (!profile || profile.disabled) { await sb.auth.signOut(); return showAuth('此帳號無法使用，請洽師培中心。'); }
@@ -297,12 +338,23 @@ async function renderPerson(empId, back) {
   ]);
   if (error) throw error;
   if (!row) { $('content').innerHTML = '<div class="card empty">尚無此人員的認證資料。</div>'; return; }
-  const d = row[D()] || row.detail;
   $('asOf').textContent = fmtTime(row.computed_at);
+  $('content').innerHTML = personHTML({ empId, back, own, row, staff, records, apps, upcoming, myRegs,
+    regime: state.regime, role: state.role, admin: isAdmin(), canAct: own || isAdmin() || state.role === 'dept_coordinator' });
+  if ($('applyForm')) $('applyForm').onsubmit = e => {
+    e.preventDefault();
+    act('cert.apply', { emp_id: empId, service_years: $('apYears').value, external_hours: $('apExt').value, memo: $('apMemo').value },
+      () => { state.list = null; renderPerson(empId, back); });
+  };
+}
+
+// 個人頁內容：登入後的「我的認證／人員頁」與免登入的「進度查詢」共用（o.lookup = 免登入、唯讀）
+function personHTML(o) {
+  const { empId, back, own, row, staff, records, apps, upcoming, myRegs, canAct } = o;
+  const d = row[o.regime === 'new' ? 'detail_new' : 'detail'] || row.detail;
   const cert = d.activeCertificate;
   const certTrack = d.trackType === 'initial' || d.trackType === 'renewal';
   const pending = (apps || []).some(a => a.status === '審核中');
-  const canAct = empId === state.me.emp_id || isAdmin() || state.role === 'dept_coordinator';
 
   const hero = `
     <section class="card hero tone-${esc(d.statusCode)}">
@@ -310,12 +362,12 @@ async function renderPerson(empId, back) {
       <span class="tag ${d.regime === 'legacy' ? 'legacy' : ''}">目前適用：${esc(d.regimeLabel)}</span>
       <div class="status">${esc(d.status)}</div>
       <div class="rule">${esc(d.trackLabel)}</div>
-      <div class="rule">工號 ${empLabel(empId)}｜${esc(staff?.dept || '')}｜${esc(staff?.title || '')}｜${esc(staff?.profession || '')}${cert ? `｜認證效期 ${esc(cert.valid_start_roc)}–${esc(cert.valid_end_roc)}` : ''}</div>
+      <div class="rule">工號 ${o.lookup ? `${esc(empId)} <span class="nm">${esc(o.name || '')}</span>` : empLabel(empId)}｜${esc(staff?.dept || '')}｜${esc(staff?.title || '')}｜${esc(staff?.profession || '')}${cert ? `｜認證效期 ${esc(cert.valid_start_roc)}–${esc(cert.valid_end_roc)}` : ''}</div>
       <div class="reason">${esc(d.statusReason)}</div>
       ${(d.recommendations || []).length ? `<ul class="recs">${d.recommendations.map(r => `<li>${esc(r)}</li>`).join('')}</ul>` : ''}
-      ${certTrack && canAct && !pending && (state.regime === 'legacy' || state.role !== 'general') ? `<details class="apply"><summary class="btn ${d.initialEligible || d.renewalCompliant ? 'btn-primary' : 'btn-ghost'}" style="width:auto">${
+      ${certTrack && canAct && !pending && (o.regime === 'legacy' || o.role !== 'general') ? `<details class="apply"><summary class="btn ${d.initialEligible || d.renewalCompliant ? 'btn-primary' : 'btn-ghost'}" style="width:auto">${
           d.initialEligible || d.renewalCompliant
-            ? `${empId === state.me.emp_id ? '申請' : '代為提報'}臨床教師認證（${d.trackType === 'renewal' ? '展延' : '新增'}）`
+            ? `${own ? '申請' : '代為提報'}臨床教師認證（${d.trackType === 'renewal' ? '展延' : '新增'}）`
             : '點數尚未達標；若另有院外修課時數，可按此提出申請'}</summary>
         <form id="applyForm" class="inline-form">
           <label>教學醫院服務年資（展延免填）<input id="apYears" type="number" step="0.1" min="0" value="${d.trackType === 'renewal' ? '' : esc(d.seniority)}"></label>
@@ -325,7 +377,7 @@ async function renderPerson(empId, back) {
         </form></details>` : ''}
       ${pending ? '<div class="note">已有一筆審核中的申請。</div>' : ''}
       ${pecEx(empId) ? `<div class="attention">醫策會不受理本院提報：${esc(pecEx(empId).reason)}（${esc(pecEx(empId).at)} 標記）。${own ? '如資料有誤，請洽師培中心。' : ''}</div>` : ''}
-      ${isAdmin() && certTrack ? (pecEx(empId)
+      ${o.admin && certTrack ? (pecEx(empId)
         ? `<button class="btn btn-ghost" type="button" onclick="togglePec('${esc(empId)}', true)">取消標記，恢復列入醫策會提報</button>`
         : `<details class="apply"><summary class="btn btn-ghost" style="width:auto">標記為醫策會不受理（不列入提報）</summary>
             <div class="inline-form"><label>原因<select id="pecReason"><option>執業登記不在本院</option><option>年資不符醫策會規定</option><option>醫策會退件（其他原因）</option></select></label>
@@ -347,16 +399,19 @@ async function renderPerson(empId, back) {
   const who = own ? '您' : '這位同仁';
   let nextBody;
   if (pending) nextBody = `<p>${who}的認證申請正在審核中，暫時不需要其他動作。</p>`;
+  else if (eligible && o.lookup) nextBody = `<p><b>您已符合資格。</b>${o.regime === 'new'
+      ? '新制的認證由科部主管統一提報，您不需要自行申請；主管送出後，師培中心會協助您完成認證。'
+      : '請登入本系統，在「我的認證」按「申請臨床教師認證」，由師培中心審查。'}</p>`;
   else if (eligible) nextBody = `<p><b>${who}已符合資格。</b>${
-      state.regime === 'new'
-        ? (own && state.role === 'general' ? '新制的認證由科部主管統一提報，您不需要自行申請；主管送出後，師培中心會協助您完成認證。' : '請在上方按「代為提報」，名單會送到師培中心。')
+      o.regime === 'new'
+        ? (own && o.role === 'general' ? '新制的認證由科部主管統一提報，您不需要自行申請；主管送出後，師培中心會協助您完成認證。' : '請在上方按「代為提報」，名單會送到師培中心。')
         : (own ? '可以直接在上方按「申請臨床教師認證」，由師培中心審查。' : '可以在上方按「代為提報」，或請同仁自行申請。')}</p>`;
   else if (!gaps.length) nextBody = `<p>目前不需要補修。${cert ? `認證效期至 ${esc(cert.valid_end_roc)}。` : ''}</p>`;
   else nextBody = `<ul class="recs">${gaps.map(g => `<li>${esc(g)}</li>`).join('')}</ul><p>${deadline}</p>
     ${useful.length ? `<div class="group-label">近期可報名、會計入教學能力提升的課程</div>
       ${useful.map(c => `<div class="next-course"><div><b>${esc(c.title)}</b><br><small>${esc(c.course_date)} ${esc((c.start_time || '').slice(0, 5))}｜${Number(c.hours)} 點${(c.sub_categories || []).length ? '｜' + esc(c.sub_categories.join('、')) : ''}</small></div>
-        ${own ? (regd.has(c.id) ? '<span class="pill expiring">已報名</span>' : `<button class="btn btn-primary" style="width:auto" type="button" onclick="act('course.register',{course_id:'${esc(c.id)}'},()=>renderPerson('${esc(empId)}'))">報名</button>`) : ''}</div>`).join('')}`
-      : `<p class="hint">目前沒有開放報名的教學能力提升課程；有新課程時會出現在「課程」頁。</p>`}`;
+        ${own && !o.lookup ? (regd.has(c.id) ? '<span class="pill expiring">已報名</span>' : `<button class="btn btn-primary" style="width:auto" type="button" onclick="act('course.register',{course_id:'${esc(c.id)}'},()=>renderPerson('${esc(empId)}'))">報名</button>`) : ''}</div>`).join('')}`
+      : `<p class="hint">目前沒有開放報名的教學能力提升課程；有新課程時會出現在${o.lookup ? '登入後的' : ''}「課程」頁。</p>`}`;
   const next = `<section class="card next"><h3>下一步</h3>${nextBody}</section>`;
 
   const meters = `
@@ -370,7 +425,7 @@ async function renderPerson(empId, back) {
     ${d.unclassifiedHours > 0 ? `<div class="note">有 ${d.unclassifiedHours} 點教學能力提升課程尚未歸類到九大項目${d.regime === 'legacy' ? '（舊制不分項目，仍計入總點數）' : '，暫不計入基礎／進階'}。</div>` : ''}
     </section>`;
 
-  const p = state.regime === 'legacy' ? d.newRulePreview : null;
+  const p = o.regime === 'legacy' ? d.newRulePreview : null;
   const preview = !p ? '' : `
     <section class="card preview ${p.wouldQualify ? 'ok' : ''}">
       <h3>${p.appliesFrom} 年起改採新制時的試算</h3>
@@ -407,12 +462,7 @@ async function renderPerson(empId, back) {
     grace: d.renewal && d.renewal.inGrace, wy: d.window && d.window.years, wl: d.window && d.window.label };
   const recs = `<section class="card" id="recSection"><h3>修課紀錄（日期、課程名稱、時數）</h3>${recordsTable(records, info)}</section>`;
 
-  $('content').innerHTML = hero + next + meters + preview + years + items + appList + recs;
-  if ($('applyForm')) $('applyForm').onsubmit = e => {
-    e.preventDefault();
-    act('cert.apply', { emp_id: empId, service_years: $('apYears').value, external_hours: $('apExt').value, memo: $('apMemo').value },
-      () => { state.list = null; renderPerson(empId, back); });
-  };
+  return hero + next + meters + preview + years + items + appList + recs;
 }
 
 // ---------- 名單 ----------

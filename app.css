@@ -45,6 +45,8 @@ form input { display: block; width: 100%; margin-top: 4px; padding: 10px 12px; b
 .nav button.is-active { background: rgba(255,255,255,.16); color: #fff; }
 .who { display: flex; align-items: center; gap: 10px; font-size: 13px; }
 .who .btn-ghost { color: #fff; border-color: rgba(255,255,255,.4); }
+#lookupView .brand { flex: 1; }   /* 免登入查詢沒有選單，把「結束查詢」推到右側 */
+.lk-note { border-left: 4px solid var(--secondary); font-size: 14px; line-height: 1.7; }
 .content { max-width: 1080px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
 .content > * { min-width: 0; }   /* 讓寬表格在卡片內捲動，不把整頁撐寬 */
 .foot { max-width: 1080px; margin: 0 auto; padding: 8px 16px 32px; font-size: 12px; color: var(--muted); }
