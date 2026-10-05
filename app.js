@@ -313,7 +313,7 @@ async function renderPerson(empId, back) {
       <div class="rule">工號 ${empLabel(empId)}｜${esc(staff?.dept || '')}｜${esc(staff?.title || '')}｜${esc(staff?.profession || '')}${cert ? `｜認證效期 ${esc(cert.valid_start_roc)}–${esc(cert.valid_end_roc)}` : ''}</div>
       <div class="reason">${esc(d.statusReason)}</div>
       ${(d.recommendations || []).length ? `<ul class="recs">${d.recommendations.map(r => `<li>${esc(r)}</li>`).join('')}</ul>` : ''}
-      ${certTrack && canAct && !pending ? `<details class="apply"><summary class="btn ${d.initialEligible || d.renewalCompliant ? 'btn-primary' : 'btn-ghost'}" style="width:auto">${
+      ${certTrack && canAct && !pending && (state.regime === 'legacy' || state.role !== 'general') ? `<details class="apply"><summary class="btn ${d.initialEligible || d.renewalCompliant ? 'btn-primary' : 'btn-ghost'}" style="width:auto">${
           d.initialEligible || d.renewalCompliant
             ? `${empId === state.me.emp_id ? '申請' : '代為提報'}臨床教師認證（${d.trackType === 'renewal' ? '展延' : '新增'}）`
             : '點數尚未達標；若另有院外修課時數，可按此提出申請'}</summary>
@@ -347,7 +347,10 @@ async function renderPerson(empId, back) {
   const who = own ? '您' : '這位同仁';
   let nextBody;
   if (pending) nextBody = `<p>${who}的認證申請正在審核中，暫時不需要其他動作。</p>`;
-  else if (eligible) nextBody = `<p><b>${who}已符合資格。</b>${own ? '可以直接在上方按「申請臨床教師認證」，由師培中心審查。' : '可以在上方按「代為提報」，或請同仁自行申請。'}</p>`;
+  else if (eligible) nextBody = `<p><b>${who}已符合資格。</b>${
+      state.regime === 'new'
+        ? (own && state.role === 'general' ? '新制的認證由科部主管統一提報，您不需要自行申請；主管送出後，師培中心會協助您完成認證。' : '請在上方按「代為提報」，名單會送到師培中心。')
+        : (own ? '可以直接在上方按「申請臨床教師認證」，由師培中心審查。' : '可以在上方按「代為提報」，或請同仁自行申請。')}</p>`;
   else if (!gaps.length) nextBody = `<p>目前不需要補修。${cert ? `認證效期至 ${esc(cert.valid_end_roc)}。` : ''}</p>`;
   else nextBody = `<ul class="recs">${gaps.map(g => `<li>${esc(g)}</li>`).join('')}</ul><p>${deadline}</p>
     ${useful.length ? `<div class="group-label">近期可報名、會計入教學能力提升的課程</div>
@@ -547,7 +550,7 @@ async function downloadPec(rows, ref, label, kindOf) {
     const general = state.rules.general || {};
     const upload = [], review = [], missing = [];
     rows.forEach(r => {
-      const who = roster.get(r.emp_id.toLowerCase()), p = certPeriod(r, ref), prof = PEC_NAME[r.staff?.profession] || r.staff?.profession;
+      const who = roster.get(r.emp_id.toLowerCase()), p = r.period || certPeriod(r, ref), prof = PEC_NAME[r.staff?.profession] || r.staff?.profession;
       if (!who || !/^[A-Z][0-9A-Z]\d{8}$/.test(who.id)) return missing.push(r.emp_id);
       upload.push({ '姓名': who.name, '身分證字號': who.id, '職類': prof, '教師認證效期起日': p.start, '教師認證效期迄日': p.end, '取得認證機構代碼': general.pec_org_code || '157', '取得認證機構名稱': general.pec_org_name || '中國醫藥大學附設醫院' });
       review.push({ '工號': r.emp_id, '姓名': who.name, '單位': r.dept, '職稱': r.staff?.title || '', '職類': prof, '申請別': kindOf(r), '教學能力提升點數': r.teach, '應達點數': r.need, '原效期迄日': r.valid_end || '', '提報效期起日': p.start, '提報效期迄日': p.end });
@@ -659,7 +662,8 @@ async function renderExpiry() {
   const rows = cur.rows.filter(r => !ex.group || profGroup(r) === ex.group)
     .sort((a, b) => Number(drop(b)) - Number(drop(a)) || Number(ready(a)) - Number(ready(b)) || a.emp_id.localeCompare(b.emp_id));
   const exportable = isAdmin() && mode !== 'new';
-  const canPick = exportable ? rows.filter(r => r.can_apply && !pecEx(r.emp_id)) : [];
+  const submittable = state.role === 'dept_coordinator' && mode !== 'new' && mode !== 'both';
+  const canPick = exportable || submittable ? rows.filter(r => r.can_apply && !pecEx(r.emp_id)) : [];
   const gap = r => {
     if (!r) return '—';
     const p = [];
@@ -676,7 +680,8 @@ async function renderExpiry() {
       ${other ? `<div class="attention">其中 <b>${dropCount}</b> 人在舊制已達標、改採新制後尚未符合，已排在最前面。</div>` : ''}
       <div class="filters">
         ${canPick.length ? `<button class="btn btn-ghost" type="button" id="pickAll">全選可提報（${canPick.length}）</button>
-          <button class="btn btn-primary" style="width:auto" type="button" id="pecBtn">下載勾選者的醫策會上傳檔</button>` : ''}
+          ${exportable ? '<button class="btn btn-primary" style="width:auto" type="button" id="pecBtn">下載勾選者的醫策會上傳檔</button>'
+            : '<button class="btn btn-primary" style="width:auto" type="button" id="sendBtn">送師培中心審查（勾選者）</button>'}` : ''}
         <button class="btn btn-ghost" type="button" id="listBtn">匯出此名單</button>
         ${nameBtn()}
         <span class="hint" id="pickN" style="align-self:center;margin:0"></span>
@@ -701,6 +706,19 @@ async function renderExpiry() {
   const sync = () => { $('pickN').textContent = ex.picked.size ? `已選 ${ex.picked.size} 人` : ''; };
   document.querySelectorAll('.pick').forEach(c => { c.onchange = () => { c.checked ? ex.picked.add(c.value) : ex.picked.delete(c.value); sync(); }; });
   if ($('pickAll')) $('pickAll').onclick = () => { canPick.forEach(r => ex.picked.add(r.emp_id)); renderExpiry(); };
+  if ($('sendBtn')) $('sendBtn').onclick = async () => {
+    const sel = canPick.filter(r => ex.picked.has(r.emp_id));
+    if (!sel.length) return toast('請先勾選要提報的同仁（只有已符合資格者可以勾選）', false);
+    $('sendBtn').disabled = true;
+    let ok = 0; const failed = [];
+    for (const r of sel) {
+      try { await api('cert.apply', { emp_id: r.emp_id, memo: '科部主管提報' }); ok++; }
+      catch (err) { failed.push(`${r.emp_id}（${err.message}）`); }
+    }
+    ex.picked = new Set(); state.list = null; state.alts = {};
+    toast(`已送出 ${ok} 人${failed.length ? `；${failed.length} 人未送出：${failed.slice(0, 3).join('、')}` : ''}`, !failed.length);
+    renderExpiry();
+  };
   if ($('pecBtn')) $('pecBtn').onclick = () => {
     const sel = canPick.filter(r => ex.picked.has(r.emp_id));
     if (!sel.length) return toast('請先勾選要提報的人員（只有已符合資格者可以勾選）', false);
@@ -827,10 +845,25 @@ async function renderReview() {
         <button class="btn btn-primary" style="width:auto;padding:6px 12px" type="button" onclick="review('${esc(a.id)}',true)">核准</button>
         <button class="btn btn-ghost" type="button" onclick="review('${esc(a.id)}',false)">退回</button>`
       : `<span class="pill ${a.status === '已通過' ? 'valid' : 'expired'}">${esc(a.status)}</span><br><small>${a.valid_start ? `${esc(a.valid_start)}～${esc(a.valid_end)}` : esc(a.review_comment || '')}</small>`}</td></tr>`;
-  $('content').innerHTML = `<section class="card"><h3>認證申請（${apps.filter(a => a.status === '審核中').length} 件待審）</h3>
+  // 已核准、待上傳醫策會：依核准月份整理，一鍵產生上傳檔（效期用核准時寫入的效期）
+  const approved = apps.filter(a => a.status === '已通過' && a.valid_start);
+  const months = [...new Set(approved.map(a => String(a.reviewed_at).slice(0, 7)))].sort().reverse();
+  const am = state.approvedMonth && months.includes(state.approvedMonth) ? state.approvedMonth : months[0];
+  const rocD = d => `${Number(d.slice(0, 4)) - 1911}/${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
+  const amRows = approved.filter(a => String(a.reviewed_at).slice(0, 7) === am && !pecEx(a.emp_id)).map(a => ({
+    emp_id: a.emp_id, dept: a.staff?.dept, staff: a.staff, teach: a.auto_check?.teaching, need: '', valid_end: '', app_type: a.app_type,
+    period: { start: rocD(a.valid_start), end: rocD(a.valid_end) } }));
+  state.approvedRows = amRows;
+  const approvedCard = !months.length ? '' : `<section class="card batch"><h3>已核准、待上傳醫策會</h3>
+    <div class="filters" style="align-items:center"><label style="margin:0;font-weight:700">核准月份 <select id="amSel" style="display:inline-block;width:auto;margin-left:6px">${months.map(m => `<option value="${m}" ${m === am ? 'selected' : ''}>${Number(m.slice(0, 4)) - 1911} 年 ${Number(m.slice(5, 7))} 月</option>`).join('')}</select></label>
+      <span class="num">共 <b>${amRows.length}</b> 人</span>
+      <button class="btn btn-primary" style="width:auto" type="button" onclick="downloadPec(state.approvedRows, undefined, '核准名單', r => r.app_type)" ${amRows.length ? '' : 'disabled'}>下載醫策會上傳檔與核對清冊</button></div>
+    <div class="note">新制由科部主管提報、您審查核准；核准後在這裡整理成醫策會上傳檔。按下後請選擇您電腦上的員工名冊（只在瀏覽器內讀取，不會上傳）。</div></section>`;
+  $('content').innerHTML = approvedCard + `<section class="card"><h3>認證申請（${apps.filter(a => a.status === '審核中').length} 件待審）</h3>
     <div class="note">核准後系統會寫入認證效期並重新計算該員狀態；提報醫策會 PEC 平台仍需在您的電腦上產生提報檔（雲端沒有身分證字號）。</div>
     <div class="table-wrap"><table><thead><tr><th>工號</th><th>申請</th><th>系統檢核</th><th>審查</th></tr></thead><tbody>
     ${apps.map(row).join('') || '<tr><td colspan="4" class="empty">目前沒有申請</td></tr>'}</tbody></table></div></section>`;
+  if ($('amSel')) $('amSel').onchange = e => { state.approvedMonth = e.target.value; renderReview(); };
 }
 function review(id, approve) { act('cert.review', { id, approve, comment: $(`cm-${id}`).value }, () => { state.list = null; renderReview(); }); }
 
