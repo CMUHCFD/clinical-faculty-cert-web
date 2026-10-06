@@ -124,7 +124,7 @@ function lookupHTML(r) {
     <div class="lk-sub">${certTrack ? '教學能力提升' : '年度總點數'}・${esc(d.window?.label || '')}</div>`;
 
   const gaps = [];
-  if ((d.missingBasicItems || []).length) gaps.push(`基礎項目還缺：${d.missingBasicItems.join('、')}`);
+  if (d.gapBasicItemsCount > 0) gaps.push(basicItemsGap(d));
   if (d.gapBasicHours > 0) gaps.push(`基礎課程還差 ${n(d.gapBasicHours)} 點`);
   if (d.gapAdvancedHours > 0) gaps.push(`進階課程還差 ${n(d.gapAdvancedHours)} 點`);
   if (!gaps.length && d.gapTotal > 0) gaps.push(`${certTrack ? '教學能力提升' : '總點數'}還差 ${n(d.gapTotal)} 點`);
@@ -163,7 +163,7 @@ function lookupHTML(r) {
   const p = r.regime === 'legacy' ? d.newRulePreview : null;
   const preview = !p ? '' : `<section class="card preview ${p.wouldQualify ? 'ok' : ''}"><h3>${p.appliesFrom} 年起改採新制時</h3>
     ${p.wouldQualify ? '<p>以目前的修課紀錄，新制下也符合，不需額外補修。</p>' : `<ul class="lk-gaps">
-      ${(p.missingBasicItems || []).length ? `<li>基礎項目還缺：${esc(p.missingBasicItems.join('、'))}</li>` : ''}
+      ${p.gapBasicItemsCount > 0 ? `<li>${esc(basicItemsGap(p))}</li>` : ''}${p.gapTotal > 0 ? `<li>合計還差 ${n(p.gapTotal)} 點</li>` : ''}
       ${p.gapBasicHours > 0 ? `<li>基礎還差 ${n(p.gapBasicHours)} 點</li>` : ''}${p.gapAdvancedHours > 0 ? `<li>進階還差 ${n(p.gapAdvancedHours)} 點</li>` : ''}</ul>`}</section>`;
 
   // ---- 各年度的課程明細：年度收合 → 教學能力提升／一般課程
@@ -199,7 +199,9 @@ function lookupHTML(r) {
     ${r.apps.map(a => `<li><span class="lk-date">${esc(fmtTime(a.submitted_at).split(' ')[0])}</span><span class="lk-title">${esc(a.app_type)}${a.valid_start ? `<small>核定效期 ${esc(a.valid_start)}～${esc(a.valid_end)}</small>` : ''}</span>
       <span class="pill ${a.status === '已通過' ? 'valid' : a.status === '審核中' ? 'expiring' : 'expired'}">${esc(a.status)}</span></li>`).join('')}</ul></section>`;
 
-  return `<div class="lk">${hero}${reqCard(d, { big: true })}${appraisalCard(d, { big: true })}${next}${detail}${preview}${apps}</div>`;
+  const dn = r.regime === 'new' ? d : r.row.detail_new;
+  const grid = certTrack ? newGrid(dn, { big: true, title: r.regime === 'new' ? '新制認證進度' : `${(d.newRulePreview && d.newRulePreview.appliesFrom) || 116} 年起改採新制：進度試算` }) : '';
+  return `<div class="lk">${hero}${reqCard(d, { big: true })}${appraisalCard(d, { big: true })}${grid}${next}${detail}${grid ? '' : preview}${apps}</div>`;
 }
 function endLookup() {
   clearTimeout(state.lkTimer);
@@ -472,6 +474,45 @@ function reqCard(d, o = {}) {
     ${o.rulesLink ? '<div class="note">各身分的完整規定請見上方選單「認證規範」。</div>' : ''}</section>`;
 }
 
+// 新制基礎必修：至少 N 項（不是四項全修）
+const basicItemsGap = x => `基礎課程還需 ${x.gapBasicItemsCount} 項${(x.missingBasicItems || []).length ? `（可從尚未修過的${x.missingBasicItems.join('、')}中選）` : ''}`;
+
+// 醫事職類新制「四宮格」：對照認證時數標準表（初次認證／展延 × 基礎／進階），本人適用的一欄顯示進度，另一欄淡化只列規則
+function newGrid(dn, o = {}) {
+  if (!dn || !(dn.trackType === 'initial' || dn.trackType === 'renewal')) return '';
+  const ini = dn.trackType === 'initial';
+  const eq = dn.itemsEquipped || {};
+  const n = v => Math.round((Number(v) || 0) * 10) / 10;
+  const bar = (have, need) => `<div class="g-bar"><i style="width:${need ? Math.min(100, have / need * 100) : 100}%" class="${have >= need ? 'ok' : ''}"></i></div>`;
+  const chips = list => `<div class="g-chips">${list.map(i => `<span class="g-chip ${n(eq[i]?.hours) > 0 ? 'on' : ''}">${esc(i)}<b>${n(eq[i]?.hours)}</b></span>`).join('')}</div>`;
+  const tag = must => `<span class="g-tag ${must ? 'must' : ''}">${must ? '必修' : '選修'}</span>`;
+  const check = ok => `<span class="g-ok ${ok ? 'yes' : ''}">${ok ? '✓ 已達' : '未達'}</span>`;
+  const yr = Number(String(dn.asOf || today()).slice(0, 4)) - 1911;
+  const needItems = dn.requiredBasicItemsCount || 2, needBasic = dn.requiredBasicHours || 4;
+  const needAdv = dn.requiredAdvancedHours || 2, needYear = dn.requiredTotalHours || 4;
+
+  const head = (on, title, rule, prog) => `<div class="g-head ${on ? 'on' : 'off'}"><b>${title}</b><span>${rule}</span>${prog || ''}</div>`;
+  const cell = (on, row, must, rule, body) => `<div class="g-cell ${on ? 'on' : 'off'}"><div class="g-row">${row}${tag(must)}</div><p class="g-rule">${rule}</p>${on ? body : ''}</div>`;
+
+  const iniHead = head(ini, '初次認證教師', '二年十小時（或十點）', ini ? `<div class="g-prog"><b class="num">${n(dn.teachingHours)} / ${dn.requiredTotalHours || 10}</b> 小時 ${check(dn.teachingHours >= (dn.requiredTotalHours || 10))}${bar(dn.teachingHours, dn.requiredTotalHours || 10)}<small>${esc(dn.window?.label || '')}</small></div>` : '<small class="g-na">取得認證前適用</small>');
+  const renHead = head(!ini, '展延認證教師', '每年四小時（或四點）', !ini ? `<div class="g-prog"><b class="num">${n(dn.teachingHours)} / ${needYear}</b> 小時 ${check(dn.teachingHours >= needYear)}${bar(dn.teachingHours, needYear)}<small>${yr} 年度</small></div>` : '<small class="g-na">取得認證後每年適用</small>');
+
+  const iniBasic = cell(ini, '基礎課程', true, '至少（含）二項課程項目，共計至少四小時',
+    `<div class="g-nums"><span>項目 <b class="num">${dn.basicItemsCount || 0} / ${needItems}</b> 項</span><span>時數 <b class="num">${n(dn.basicHours)} / ${needBasic}</b> 小時</span>
+      ${check((dn.basicItemsCount || 0) >= needItems && dn.basicHours >= needBasic)}</div>${bar(dn.basicHours, needBasic)}${chips(BASIC)}`);
+  const iniAdv = cell(ini, '進階課程', false, '可任選，時數計入二年十小時',
+    `<div class="g-nums"><span>已修 <b class="num">${n(dn.advancedHours)}</b> 小時</span></div>${chips(ADVANCED)}`);
+  const renBasic = cell(!ini, '基礎課程', false, '可任選，時數計入每年四小時',
+    `<div class="g-nums"><span>今年已修 <b class="num">${n(dn.basicHours)}</b> 小時</span></div>${chips(BASIC)}`);
+  const renAdv = cell(!ini, '進階課程', true, '每年至少二小時（或二點）',
+    `<div class="g-nums"><span>今年 <b class="num">${n(dn.advancedHours)} / ${needAdv}</b> 小時</span>${check(dn.advancedHours >= needAdv)}</div>${bar(dn.advancedHours, needAdv)}${chips(ADVANCED)}`);
+
+  const uncls = dn.unclassifiedHours > 0 ? `<div class="note">另有 ${n(dn.unclassifiedHours)} 小時教學能力提升課程尚未歸類到基礎或進階項目：會計入總時數，但不計入基礎／進階。如有疑問請洽師培中心。</div>` : '';
+  return `<section class="card grid4-card ${o.big ? 'big' : ''}"><h3>${esc(o.title || '新制認證進度')}</h3>
+    <p class="hint">依「教學能力提升（基礎／進階）課程分類與認證時數標準」。${ini ? '您目前適用左欄「初次認證教師」。' : '您目前適用右欄「展延認證教師」。'}</p>
+    <div class="grid4">${iniHead}${renHead}${iniBasic}${renBasic}${iniAdv}${renAdv}</div>${uncls}</section>`;
+}
+
 // 主治醫師年度考核分數：上課時數 → 基本分（級距中標出目前所在級）＋核心教師認證課程加分
 function appraisalCard(d, o = {}) {
   const a = d.appraisal;
@@ -564,7 +605,7 @@ function personHTML(o) {
   // 下一步：把「現在該做什麼」放在結論之後、細節之前
   const eligible = certTrack && (d.initialEligible || d.renewalCompliant);
   const gaps = [];
-  if ((d.missingBasicItems || []).length) gaps.push(`基礎項目尚缺：${d.missingBasicItems.join('、')}`);
+  if (d.gapBasicItemsCount > 0) gaps.push(basicItemsGap(d));
   if (d.gapBasicHours > 0) gaps.push(`基礎課程還差 ${d.gapBasicHours} 點`);
   if (d.gapAdvancedHours > 0) gaps.push(`進階課程還差 ${d.gapAdvancedHours} 點`);
   if (!gaps.length && d.gapTotal > 0) gaps.push(`教學能力提升還差 ${d.gapTotal} 點`);
@@ -600,7 +641,7 @@ function personHTML(o) {
       <div class="rule">${esc(p.trackLabel)}</div>
       <div><b>${esc(p.status)}</b></div>
       ${p.wouldQualify ? '<div class="note">以目前的修課紀錄，新制下也符合，不需額外補修。</div>' : `<ul>
-        ${(p.missingBasicItems || []).length ? `<li>基礎項目尚缺：<b>${esc(p.missingBasicItems.join('、'))}</b></li>` : ''}
+        ${p.gapBasicItemsCount > 0 ? `<li><b>${esc(basicItemsGap(p))}</b></li>` : ''}${p.gapTotal > 0 ? `<li>合計還差 <b>${p.gapTotal}</b> 點</li>` : ''}
         ${p.gapBasicHours > 0 ? `<li>基礎還差 <b>${p.gapBasicHours}</b> 點（${p.basicHours} / ${p.requiredBasicHours}）</li>` : ''}
         ${p.gapAdvancedHours > 0 ? `<li>進階還差 <b>${p.gapAdvancedHours}</b> 點（${p.advancedHours} / ${p.requiredAdvancedHours}）</li>` : ''}
       </ul>`}
@@ -630,7 +671,10 @@ function personHTML(o) {
     grace: d.renewal && d.renewal.inGrace, wy: d.window && d.window.years, wl: d.window && d.window.label };
   const recs = `<section class="card" id="recSection"><h3>修課紀錄（日期、課程名稱、時數）</h3>${recordsTable(records, info)}</section>`;
 
-  return hero + meters + appraisalCard(d) + next + preview + years + items + appList + recs;   // 結論 → 我的身分要完成什麼 → 下一步 → 細節
+  // 醫事職類：以新制四宮格取代「新制試算」與「九大項目」兩張卡（舊制期間顯示為新制試算）
+  const dn = o.regime === 'new' ? d : row.detail_new;
+  const grid = certTrack ? newGrid(dn, { title: o.regime === 'new' ? '新制認證進度' : `${(d.newRulePreview && d.newRulePreview.appliesFrom) || 116} 年起改採新制：進度試算` }) : '';
+  return hero + meters + appraisalCard(d) + next + (grid || preview) + years + (grid ? '' : items) + appList + recs;   // 結論 → 我的身分要完成什麼 → 下一步 → 細節
 }
 
 // 認證規範頁：主治醫師年度考核分數的計分方式
@@ -685,12 +729,17 @@ async function renderRules() {
           <dt>展延</dt><dd>效期屆滿前 ${(L.renewal_window_months || 24) / 12} 年內完成 ${L.renewal_total || 8} 點（平均每年 4 點）</dd>
           <dt>保留期</dt><dd>屆滿後 ${L.grace_months || 10} 個月內補足可重新取得資格；保留期間不具教師資格</dd></dl></div>
       <div class="cmp-col ${isNew ? 'now' : ''}"><h4>新制（${(R.regime || {}).new_from_year ? (R.regime.new_from_year - 1911) + ' 年起' : '修訂草案'}）${isNew ? '<span class="pill valid">目前適用</span>' : ''}</h4>
-        <dl><dt>初次認證</dt><dd>認證前 ${ini.timeframe_years || 2} 年內完成 ${ini.required_total_hours || 10} 點：基礎四項（課程設計、教學技巧、評估技巧、教材製作）各 1 點，加上進階 ${(ini.advanced_courses || {}).required_total_hours || 6} 點</dd>
+        <dl><dt>初次認證</dt><dd>認證前 ${ini.timeframe_years || 2} 年內完成 ${ini.required_total_hours || 10} 點；基礎必修至少（含）${(ini.basic_courses || {}).min_items || 2} 項共 ${(ini.basic_courses || {}).required_total_hours || 4} 點，進階選修</dd>
           <dt>效期</dt><dd>${rc.validity_years || 4} 年（次年 1/1 起至第 ${rc.validity_years || 4} 年 12/31）</dd>
-          <dt>展延</dt><dd>效期內每年 ${rc.annual_required_hours || 4} 點（基礎 ${rc.annual_basic_required_hours ?? 2}＋進階 ${rc.annual_advanced_required_hours ?? 2}），不得跨年抵充</dd>
+          <dt>展延</dt><dd>效期內每年 ${rc.annual_required_hours || 4} 點，其中進階必修至少 ${rc.annual_advanced_required_hours ?? 2} 點，基礎選修；不得跨年抵充</dd>
           <dt>補救</dt><dd>${esc(rc.remedy_rule || '')}</dd>
           <dt>提報</dt><dd>由科部主管統一提報，師培中心審查</dd></dl></div>
     </div>
+    <h4 style="margin-top:14px">新制：教學能力提升課程分類與認證時數標準</h4>
+    <div class="table-wrap"><table class="rules-t std-t"><thead><tr><th>類別</th><th>課程項目</th><th>初次認證教師<br><small>二年十小時（或十點）</small></th><th>展延認證教師<br><small>每年四小時（或四點）</small></th></tr></thead><tbody>
+      <tr><td><b>基礎課程</b></td><td>${BASIC.join('<br>')}</td><td><b class="must">必修</b>；至少（含）二項課程項目，共計至少四小時（或四點）</td><td>選修</td></tr>
+      <tr><td><b>進階課程</b></td><td>${ADVANCED.join('<br>')}</td><td>選修</td><td><b class="must">必修</b>；每年至少二小時（或二點）</td></tr>
+    </tbody></table></div>
     <h4 style="margin-top:14px">教學醫院執業年資門檻</h4>
     <div class="table-wrap"><table><thead><tr><th>職類</th><th>取得教師資格</th><th>可開始修課採計</th></tr></thead><tbody>${seniorityRows}</tbody></table></div>
     <div class="note">醫策會教師認證資料中「教學年資」標示為「不符合」的認證，本系統不採計為有效認證。</div></section>`;
