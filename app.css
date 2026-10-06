@@ -26,7 +26,8 @@ button, input, select { font: inherit; }
 /* 登入 */
 .auth { min-height: 100vh; display: grid; place-items: center; padding: 16px; }
 .auth-card { width: 100%; max-width: 400px; background: var(--card); border-radius: 16px; padding: 28px 24px; box-shadow: 0 8px 30px rgba(22,70,97,.12); border-top: 6px solid var(--primary); }
-.auth-card h1 { font-size: 24px; }
+.auth-logo { display: block; width: 100%; height: auto; margin: 0 0 16px; }
+.auth-card h1 { font-size: 24px; margin-bottom: 16px; }
 .auth-sub { margin: 2px 0 18px; color: var(--muted); }
 /* 登入頁：免登入查詢的大按鈕，與登入區明確分開 */
 .big-cta { display: flex; align-items: center; gap: 14px; width: 100%; min-height: 84px; padding: 16px 18px; border: 0; border-radius: 14px; cursor: pointer;
@@ -53,7 +54,8 @@ form input { display: block; width: 100%; margin-top: 4px; padding: 10px 12px; b
 
 /* 版面 */
 .topbar { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding: 10px 16px; background: var(--primary-dark); color: #fff; }
-.brand { font-weight: 800; font-size: 16px; }
+.brand { font-weight: 800; font-size: 16px; display: flex; align-items: center; gap: 10px; }
+.brand-mark { width: 36px; height: 36px; background: #fff; border-radius: 50%; padding: 2px; flex: 0 0 auto; }
 .nav { display: flex; gap: 4px; flex: 1; flex-wrap: wrap; }
 .nav button { border: 0; background: transparent; color: #cfe3ee; padding: 6px 12px; border-radius: 8px; font-weight: 700; cursor: pointer; }
 .nav button.is-active { background: rgba(255,255,255,.16); color: #fff; }
