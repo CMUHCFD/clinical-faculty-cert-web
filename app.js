@@ -335,7 +335,7 @@ async function showNames() {
 // 職類分組：醫師依 ED-026 第四條身分（住院醫師年級、研究醫師、主治醫師）；護理依所屬單位再分為「護理部」與「非護理部」
 const profGroup = r => {
   const p = r.staff?.profession || '其他';
-  if (r.cat && ['西醫師', '中醫師', '牙醫師'].includes(p)) return `${p}｜${r.cat}`;
+  if (p === '醫師' || ['西醫師', '中醫師', '牙醫師'].includes(p)) return r.cat ? `醫師｜${r.cat}` : '醫師';
   return p === '護理' ? ((r.dept || '').startsWith('護理部') ? '護理（護理部）' : '護理（非護理部）') : p;
 };
 const PEC_NAME = { '藥師': '藥事', '檢驗': '醫事檢驗', '放射師(放射診斷、放射腫瘤、核子醫學)': '醫事放射' };
@@ -610,14 +610,15 @@ async function renderRules() {
       <div class="rule">${esc(md.trackLabel || '')}</div>
       <button class="btn btn-primary" style="width:auto;margin-top:8px" type="button" onclick="go('mine')">看我的進度</button></section>` : '';
 
-  const doctors = `<section class="card"><h3>一、醫師（西醫師、中醫師、牙醫師）｜每年完成</h3>
+  const doctors = `<section class="card"><h3>一、醫師（依執登職類：西醫師、中醫師、牙醫師執照）｜每年完成</h3>
     <p class="hint">「一般醫學基本能力」與「教學能力提升」課程都可計入總點數，其中教學能力提升要達到下表下限。每年 1/1–12/31 分年計算，不得跨年抵充。</p>
     <div class="table-wrap"><table class="rules-t"><thead><tr><th>身分（依職稱）</th><th>每年應完成</th></tr></thead><tbody>
     ${(ph.categories || []).map(c => `<tr${here(myCat === c.id)}><td><b>${esc(c.name)}</b></td>
       <td>總點數 <b class="num">${c.annual_total_hours}</b> 點，其中教學能力提升至少 <b class="num">${c.annual_teaching_skill_hours}</b> 點${c.annual_irb_hours ? `；另人體試驗相關訓練至少 <b class="num">${c.annual_irb_hours}</b> 點` : ''}</td></tr>`).join('')}
     </tbody></table></div>
-    <div class="note">住院醫師的年級以職稱判定（第一、二年 → R1–R2；第三年以上、總醫師 → R3+）；研究醫師與完訓醫師適用研究醫師規定；主治醫師、主任等適用主治醫師規定。
-      ${(ph.not_applicable_titles || []).length ? `職稱含「${ph.not_applicable_titles.join('」「')}」者不在第四條所列身分，不列管。` : ''}</div></section>`;
+    <div class="note">先依「執登職類」判定是否為醫師（持西醫師、中醫師或牙醫師執照者一律歸為醫師），再依職稱分身分：
+      第一、二年住院醫師 → 住院醫師（第一、二年）；第三年以上住院醫師、總醫師 → 住院醫師（第三年以上）；研究醫師、完訓醫師 → 研究醫師／完訓醫師；主治醫師、主任等 → 主治醫師。
+      PGY 醫師不在第四條所列身分，不列管；沒有本院執登資料者（兼任、代訓醫師等）依執登職類不屬醫師，也不列管。</div></section>`;
 
   const seniorityRows = (R.professions || []).map(p => `<tr${here(myProf && (p.name === myProf))}><td>${esc(p.name)}</td><td class="num">${p.seniority_years} 年</td><td class="num">${p.training_eligibility_years} 年</td></tr>`).join('');
   const allied = `<section class="card"><h3>二、醫事人員｜衛福部臨床醫事人員培訓計畫之臨床教師</h3>
@@ -747,7 +748,7 @@ function annualCard(list) {
   return `<section class="card"><h3>醫師與其他人員：今年度師培時數（ED-026 第四條）</h3>
     <div class="rule">今年度已達標 <b class="num">${met}</b> / ${annual.length} 人（${Math.round(met / annual.length * 100)}%）${exempt ? `；不列管 ${exempt} 人（行政及其他人員、PGY、代訓醫師等）` : ''}</div>
     <div class="legend"><span><i style="background:var(--success)"></i>已達標</span><span><i style="background:var(--mist)"></i>未達標</span></div>
-    ${distRows(annual, r => r.track_type === 'physician' ? `${r.staff?.profession || '醫師'}｜${r.cat || ''}` : (r.cat || '其他人員'))}</section>`;
+    ${distRows(annual, r => r.track_type === 'physician' ? `醫師｜${r.cat || ''}` : (r.cat || '其他人員'))}</section>`;
 }
 
 // ---------- 到期與提報：① 選時間 → ② 選職類 → ③ 名單與匯出（分段下鑽） ----------
