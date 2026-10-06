@@ -82,6 +82,27 @@ form input { display: block; width: 100%; margin-top: 4px; padding: 10px 12px; b
 .req-list li.met .bar i { background: var(--success); }
 .req-list small { color: var(--muted); }
 .req-card.big .req-label { font-size: 16px; } .req-card.big .req-num { font-size: 19px; }
+/* 主治醫師年度考核分數 */
+.appr-top { display: flex; flex-wrap: wrap; gap: 16px; align-items: stretch; }
+.appr-score { flex: 0 0 auto; min-width: 120px; border-radius: 12px; padding: 12px 16px; display: grid; justify-items: center; align-content: center; color: #fff; }
+.appr-score b { font-size: 44px; line-height: 1; }
+.appr-score span { font-weight: 700; } .appr-score small { opacity: .9; }
+.appr-score.tone-ok { background: #2b7a6b; } .appr-score.tone-mid { background: var(--primary); }
+.appr-score.tone-low { background: #8a6d00; } .appr-score.tone-neg { background: #b3261e; }
+.appr-calc { flex: 1; min-width: 220px; display: grid; gap: 8px; }
+.appr-calc > div { display: grid; grid-template-columns: 1fr auto; gap: 0 10px; border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+.appr-calc span { color: var(--muted); font-size: 14px; } .appr-calc b { font-size: 17px; text-align: right; }
+.appr-calc small { grid-column: 1 / -1; color: var(--muted); font-size: 12.5px; }
+.appr-next { font-weight: 700; margin: 12px 0 8px; }
+.tiers { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.tier { font-size: 13px; border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; color: var(--muted); }
+.tier.on { border-color: var(--primary); background: var(--primary-light); color: var(--primary-dark); font-weight: 700; }
+.appr.big .appr-score b { font-size: 52px; } .appr.big .appr-calc b { font-size: 19px; }
+.score-dist { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; }
+.sd { border-radius: 10px; padding: 10px; display: grid; gap: 2px; background: #eef1f3; }
+.sd b { font-size: 24px; } .sd span { font-weight: 700; } .sd small { color: var(--muted); font-size: 12px; }
+.sd.valid { background: #EDF8F6; } .sd.eligible { background: #EBF5FB; } .sd.expiring { background: #FFFBE6; } .sd.expired { background: #FFF0F1; } .sd.bonus { background: var(--primary-light); }
+
 /* 認證規範 */
 .req-you { border-left: 6px solid var(--primary); }
 tr.mine td, p.mine { background: #FFFBE6; font-weight: 700; }

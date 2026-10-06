@@ -199,7 +199,7 @@ function lookupHTML(r) {
     ${r.apps.map(a => `<li><span class="lk-date">${esc(fmtTime(a.submitted_at).split(' ')[0])}</span><span class="lk-title">${esc(a.app_type)}${a.valid_start ? `<small>核定效期 ${esc(a.valid_start)}～${esc(a.valid_end)}</small>` : ''}</span>
       <span class="pill ${a.status === '已通過' ? 'valid' : a.status === '審核中' ? 'expiring' : 'expired'}">${esc(a.status)}</span></li>`).join('')}</ul></section>`;
 
-  return `<div class="lk">${hero}${reqCard(d, { big: true })}${next}${detail}${preview}${apps}</div>`;
+  return `<div class="lk">${hero}${reqCard(d, { big: true })}${appraisalCard(d, { big: true })}${next}${detail}${preview}${apps}</div>`;
 }
 function endLookup() {
   clearTimeout(state.lkTimer);
@@ -272,7 +272,11 @@ const colsFor = d => `emp_id,dept,computed_at,status_code:${d}->>statusCode,stat
   `ve:${d}->activeCertificate->>valid_end,basic:${d}->>basicHours,adv:${d}->>advancedHours,gap_t:${d}->>gapTotal,` +
   `gap_b:${d}->>gapBasicHours,gap_a:${d}->>gapAdvancedHours,cp:${d}->>compliant,grace:${d}->renewal->>inGrace,` +
   `rg:${d}->>regime,wy:${d}->window->years,wl:${d}->window->>label,le:${d}->lastCertificate->>valid_end,` +
-  `new_ok:detail->newRulePreview->>wouldQualify,new_reason:detail->newRulePreview->>statusReason,cat:${d}->>categoryName,staff(title,profession)`;
+  `new_ok:detail->newRulePreview->>wouldQualify,new_reason:detail->newRulePreview->>statusReason,cat:${d}->>categoryName,` +
+  `tot:${d}->>totalHours,score:${d}->appraisal->>score,sbase:${d}->appraisal->>base,staff(title,profession)`;
+// 名單上的「點數」：醫師等每年規範看總點數（一般醫學＋教學能力提升），認證教師看教學能力提升
+const hoursOf = r => (r.track_type === 'physician' || r.track_type === 'annual' ? r.tot : r.teach);
+const scorePill = r => r.score == null ? '' : ` <span class="pill ${Number(r.sbase) >= 10 ? 'valid' : Number(r.sbase) >= 5 ? 'eligible' : Number(r.sbase) >= 0 ? 'expiring' : 'expired'}" title="主治醫師年度考核分數">考核 ${esc(r.score)} 分</span>`;
 const listCols = () => colsFor(D());
 // ---------- 修課時數下鑽：點時數 → 看是哪些課（日期、課程名稱、時數），並標出哪些計入本次採計 ----------
 // info = { track_type, rg(制度), ve(有效認證迄日), le(已屆滿的上一張迄日), grace, wy(採計年度), wl(採計期間說明) }
@@ -468,6 +472,37 @@ function reqCard(d, o = {}) {
     ${o.rulesLink ? '<div class="note">各身分的完整規定請見上方選單「認證規範」。</div>' : ''}</section>`;
 }
 
+// 主治醫師年度考核分數：上課時數 → 基本分（級距中標出目前所在級）＋核心教師認證課程加分
+function appraisalCard(d, o = {}) {
+  const a = d.appraisal;
+  if (!a) return '';
+  const n = v => Math.round((Number(v) || 0) * 10) / 10;
+  const sign = v => (v > 0 ? `+${v}` : v < 0 ? `−${Math.abs(v)}` : '0');
+  const tone = a.base >= 10 ? 'ok' : a.base >= 5 ? 'mid' : a.base >= 0 ? 'low' : 'neg';
+  let nextTip = '基本分已達最高級。';
+  if (a.next) {
+    const { needHours: h, needTeaching: t, score } = a.next;
+    const what = h > 0 && t > 0 ? `${h} 小時師培課程（其中教學能力提升 ${t} 小時）` : h > 0 ? `${h} 小時師培課程` : `教學能力提升 ${t} 小時`;
+    nextTip = `再完成 ${what}，基本分可達 ${score} 分。`;
+  }
+  return `<section class="card appr ${o.big ? 'big' : ''}">
+    <h3>${a.roc} 年度主治醫師考核分數</h3>
+    <div class="appr-top">
+      <div class="appr-score tone-${tone}"><b class="num">${n(a.score)}</b><span>分</span><small>滿分 ${a.maxScore}</small></div>
+      <div class="appr-calc">
+        <div><span>上課時數</span><b class="num">${n(a.hours)} 小時</b><small>其中教學能力提升 ${n(a.teaching)} 小時</small></div>
+        <div><span>基本分</span><b class="num">${sign(a.base)} 分</b><small>${esc(a.baseLabel)}</small></div>
+        <div><span>核心教師認證加分</span><b class="num">${sign(a.bonus)} 分</b><small>${n(a.coreHours)} 小時，1 小時 1 分，上限 ${a.bonusCap} 分</small></div>
+      </div>
+    </div>
+    <p class="appr-next">${esc(nextTip)}</p>
+    <div class="tiers">${a.tiers.map(t => `<span class="tier ${t.score === a.base ? 'on' : ''}"><b>${sign(t.score)}</b> ${esc(t.label)}</span>`).join('')}</div>
+    ${(a.coreCourses || []).length ? `<div class="group-label">列入加分的核心教師認證課程</div><ul class="lk-list">
+      ${a.coreCourses.map(c => `<li><span class="lk-date">${Number(c.date.slice(5, 7))}/${Number(c.date.slice(8, 10))}</span><span class="lk-title">${esc(c.title)}<small>${esc(c.item)}</small></span><span class="lk-h">${n(c.hours)}</span></li>`).join('')}</ul>`
+      : '<p class="hint">今年度尚無核心教師認證課程（如 SDM 醫病共享決策、EPA 可信賴專業活動、ACGME 臨床教練）。</p>'}
+  </section>`;
+}
+
 async function renderPerson(empId, back) {
   const own = empId === state.me.emp_id;
   const [{ data: row, error }, { data: staff }, { data: records }, { data: apps }, { data: upcoming }, { data: myRegs }] = await Promise.all([
@@ -595,7 +630,19 @@ function personHTML(o) {
     grace: d.renewal && d.renewal.inGrace, wy: d.window && d.window.years, wl: d.window && d.window.label };
   const recs = `<section class="card" id="recSection"><h3>修課紀錄（日期、課程名稱、時數）</h3>${recordsTable(records, info)}</section>`;
 
-  return hero + meters + next + preview + years + items + appList + recs;   // 結論 → 我的身分要完成什麼 → 下一步 → 細節
+  return hero + meters + appraisalCard(d) + next + preview + years + items + appList + recs;   // 結論 → 我的身分要完成什麼 → 下一步 → 細節
+}
+
+// 認證規範頁：主治醫師年度考核分數的計分方式
+function apprRules(A, mine) {
+  if (!A) return '';
+  const sign = v => (v > 0 ? `+${v}` : v < 0 ? `−${Math.abs(v)}` : '0');
+  const rows = [...(A.tiers || [])].sort((a, b) => b.score - a.score).map(t => [t.label, t.score]).concat([[A.below_label || '未達 1 小時', A.below_score ?? -5]]);
+  return `<h4 style="margin:16px 0 6px">主治醫師年度考核分數</h4>
+    <div class="table-wrap"><table class="rules-t${mine ? ' mine-t' : ''}"><thead><tr><th>當年度師培時數（一般醫學＋教學能力提升）</th><th>基本分</th></tr></thead><tbody>
+      ${rows.map(([l, s]) => `<tr><td>${esc(l)}</td><td class="num"><b>${sign(s)}</b> 分</td></tr>`).join('')}
+      <tr><td>加分：${esc((A.bonus || {}).label || '核心教師認證課程，1 小時 1 分')}</td><td class="num">最多 +${(A.bonus || {}).cap ?? 20} 分</td></tr>
+    </tbody></table></div>`;
 }
 
 // ---------- 認證規範：依身分整理 ED-026 第四條，並標出登入者自己的身分 ----------
@@ -625,7 +672,9 @@ async function renderRules() {
     </tbody></table></div>
     <div class="note">先依「執登職類」判定是否為醫師（持西醫師、中醫師或牙醫師執照者一律歸為醫師），再依職稱分身分：
       第一、二年住院醫師 → 住院醫師（第一、二年）；第三年以上住院醫師、總醫師 → 住院醫師（第三年以上）；研究醫師、完訓醫師 → 研究醫師／完訓醫師；主治醫師、主任等 → 主治醫師。
-      PGY 醫師不在第四條所列身分，不列管；沒有本院執登資料者（兼任、代訓醫師等）依執登職類不屬醫師，也不列管。</div></section>`;
+      PGY 醫師不在第四條所列身分，不列管；沒有本院執登資料者（兼任、代訓醫師等）依執登職類不屬醫師，也不列管。
+      符合當年度時數規範者，即為當年度臨床教師。</div>
+    ${apprRules(ph.vs_appraisal, myCat === 'vs')}</section>`;
 
   const seniorityRows = (R.professions || []).map(p => `<tr${here(myProf && (p.name === myProf))}><td>${esc(p.name)}</td><td class="num">${p.seniority_years} 年</td><td class="num">${p.training_eligibility_years} 年</td></tr>`).join('');
   const allied = `<section class="card"><h3>二、醫事人員｜衛福部臨床醫事人員培訓計畫之臨床教師</h3>
@@ -696,7 +745,7 @@ async function renderList() {
         ${nameBtn()}
         <span id="fN" class="hint" style="align-self:center;margin:0"></span>
       </div>
-      <div class="table-wrap"><table><thead><tr><th>員工編號</th><th>單位</th><th>職稱</th><th>職類</th><th>教學點數</th><th>狀態</th><th>說明</th><th>${state.regime === 'legacy' ? '新制試算' : ''}</th></tr></thead><tbody id="tb"></tbody></table></div>
+      <div class="table-wrap"><table><thead><tr><th>員工編號</th><th>單位</th><th>職稱</th><th>職類</th><th title="醫師：年度總點數；醫事人員：教學能力提升點數">點數</th><th>狀態</th><th>說明</th><th>${state.regime === 'legacy' ? '新制試算' : ''}</th></tr></thead><tbody id="tb"></tbody></table></div>
     </section>`;
   const draw = () => {
     const q = $('fQ').value.trim().toLowerCase(), s = $('fS').value;
@@ -711,8 +760,8 @@ async function renderList() {
     $('tb').innerHTML = rows.slice(0, 300).map(r => `<tr>
       <td><button class="btn-link" type="button" onclick="go('person','${esc(r.emp_id)}')">${empLabel(r.emp_id)}</button>${pecTag(r.emp_id)}${r.on_plan ? ' <span class="pill eligible" title="列入本年度追蹤名單">追蹤</span>' : ''}</td>
       <td>${esc(r.dept)}</td><td>${esc(r.staff?.title || '')}</td><td>${esc(profGroup(r))}</td>
-      <td class="num"><button class="btn-link" type="button" title="查看修課紀錄" onclick="showRecords('${esc(r.emp_id)}')">${esc(r.teach)}</button> / ${esc(r.need)}</td>
-      <td><span class="pill ${esc(r.status_code)}">${esc(r.status)}</span>${r.valid_end ? `<br><small>至 ${esc(r.valid_end)}</small>` : ''}</td>
+      <td class="num"><button class="btn-link" type="button" title="查看修課紀錄" onclick="showRecords('${esc(r.emp_id)}')">${esc(hoursOf(r))}</button> / ${esc(r.need)}</td>
+      <td><span class="pill ${esc(r.status_code)}">${esc(r.status)}</span>${scorePill(r)}${r.valid_end ? `<br><small>至 ${esc(r.valid_end)}</small>` : ''}</td>
       <td class="reason">${esc(r.reason)}</td>
       <td>${r.new_ok === 'true' ? '<span class="pill valid">符合</span>' : r.new_ok === 'false' ? `<span class="pill expiring" title="${esc(r.new_reason)}">尚未符合</span>` : ''}</td>
     </tr>`).join('') || '<tr><td colspan="8" class="empty">查無符合條件的人員</td></tr>';
@@ -752,10 +801,21 @@ function annualCard(list) {
   const exempt = list.filter(r => r.track_type === 'exempt').length;
   if (!annual.length) return '';
   const met = annual.filter(r => r.status_code === 'valid').length;
+  // 主治醫師年度考核分數分佈
+  const vs = annual.filter(r => r.score != null);
+  const tierN = b => vs.filter(r => Number(r.sbase) === b).length;
+  const avg = vs.length ? Math.round(vs.reduce((a, r) => a + Number(r.score), 0) / vs.length * 10) / 10 : 0;
+  const scoreBlock = !vs.length ? '' : `<h4 style="margin:16px 0 6px">主治醫師年度考核分數（${vs.length} 人，平均 <span class="num">${avg}</span> 分）</h4>
+    <div class="score-dist">
+      ${[[10, '10 分', '達 4 小時含教學 2 小時', 'valid'], [5, '5 分', '達 2–3 小時', 'eligible'], [0, '0 分', '達 1 小時', 'expiring'], [-5, '−5 分', '未達 1 小時', 'expired']]
+        .map(([b, t, d, c]) => `<div class="sd ${c}"><b class="num">${tierN(b)}</b><span>${t}</span><small>${d}</small></div>`).join('')}
+      <div class="sd bonus"><b class="num">${vs.filter(r => Number(r.score) > Number(r.sbase)).length}</b><span>有加分</span><small>核心教師認證課程</small></div>
+    </div>
+    <div class="note">基本分依當年度師培時數；另以師培中心核心教師認證課程（SDM、EPA、ACGME 臨床教練等）時數加分，1 小時 1 分，上限 20 分。</div>`;
   return `<section class="card"><h3>醫師與其他人員：今年度師培時數（ED-026 第四條）</h3>
     <div class="rule">今年度已達標 <b class="num">${met}</b> / ${annual.length} 人（${Math.round(met / annual.length * 100)}%）${exempt ? `；不列管 ${exempt} 人（行政及其他人員、PGY、代訓醫師等）` : ''}</div>
     <div class="legend"><span><i style="background:var(--success)"></i>已達標</span><span><i style="background:var(--mist)"></i>未達標</span></div>
-    ${distRows(annual, r => r.track_type === 'physician' ? `醫師｜${r.cat || ''}` : (r.cat || '其他人員'))}</section>`;
+    ${distRows(annual, r => r.track_type === 'physician' ? `醫師｜${r.cat || ''}` : (r.cat || '其他人員'))}${scoreBlock}</section>`;
 }
 
 // ---------- 到期與提報：① 選時間 → ② 選職類 → ③ 名單與匯出（分段下鑽） ----------
