@@ -404,7 +404,7 @@ async function boot() {
   if (state.role === 'dept_coordinator') views.push(['dept', '科部總覽'], ['expiry', '到期與提報']);
   views.push(['mine', '我的認證'], ['courses', '課程'], ['rules', '認證規範']);
   if (isAdmin()) views.push(['review', '審查']);
-  if (isAdmin() || state.role === 'dept_coordinator') views.push(['roster', '追蹤名單']);
+  if (isAdmin() || state.role === 'dept_coordinator') views.push(['roster', '追蹤名單'], ['ratio', '師生比']);
   if (state.role === 'super_admin') views.push(['admin', '管理']);
   $('nav').innerHTML = views.map(([v, t]) => `<button type="button" data-view="${v}">${t}</button>`).join('');
   $('nav').querySelectorAll('button').forEach(b => { b.onclick = () => go(b.dataset.view); });
@@ -427,7 +427,7 @@ function go(view, arg) {
   $('nav').querySelectorAll('button').forEach(b => b.classList.toggle('is-active', b.dataset.view === view));
   $('content').innerHTML = '<div class="card empty">載入中…</div>';
   const run = { mine: () => renderPerson(state.me.emp_id), person: () => renderPerson(arg, true), dept: renderList, all: renderOverview,
-    courses: renderCourses, rules: renderRules, review: renderReview, roster: renderRoster, admin: renderAdmin, expiry: renderExpiry }[view];
+    courses: renderCourses, rules: renderRules, ratio: renderRatio, review: renderReview, roster: renderRoster, admin: renderAdmin, expiry: renderExpiry }[view];
   // 連續快速切換頁面時，較早的頁面可能較晚才載完而蓋掉畫面：發現過期就重畫目前頁面
   const token = state.nav = (state.nav || 0) + 1;
   state.arg = arg;
@@ -756,6 +756,52 @@ async function renderRules() {
     <div class="note">依據：臨床教學師資培育暨獎勵辦法（ED-026）第二條、第四條。本頁內容由系統規則設定產生，與計算結果使用同一份規則。</div></section>`;
 
   $('content').innerHTML = you + doctors + allied + others + common;
+}
+
+// ---------- 師生比：衛福部臨床醫事人員培訓計畫每月核定人員（核定點數 5000＝PGY 學員、0＝臨床教師），至少 1:3 ----------
+async function renderRatio() {
+  const { data } = await sb.from('settings').select('value').eq('key', 'teacher_ratio').maybeSingle();
+  const months = (data && data.value && data.value.months) || {};
+  const keys = Object.keys(months).sort().reverse();
+  if (!keys.length) { $('content').innerHTML = '<div class="card empty">尚無每月核定人員資料。師培中心執行 node tools/teacher-ratio.js 後會顯示。</div>'; return; }
+  const k = keys.includes(state.ratioMonth) ? state.ratioMonth : keys[0];
+  const M = months[k], R = M.ratioRequired || 3;
+  const label = key => `${Number(key.slice(0, 3))} 年 ${Number(key.slice(4))} 月`;
+  const bad = M.rows.filter(r => !r.ok);
+  const invalid = M.rows.reduce((a, r) => a + r.teachersInvalid, 0);
+  const row = r => {
+    const cap = r.teachersValid * R, use = cap ? Math.min(100, r.trainees / cap * 100) : (r.trainees ? 100 : 0);
+    return `<tr class="${r.ok ? '' : 'bad'}">
+      <td><b>${esc(r.prof)}</b></td>
+      <td class="num">${r.teachers}${r.teachersInvalid ? ` <small class="warn">（${r.teachersInvalid} 位認證有問題）</small>` : ''}</td>
+      <td class="num">${r.trainees}</td>
+      <td class="num"><b>${r.ratio == null ? '—' : `1 : ${r.ratio}`}</b></td>
+      <td style="min-width:150px"><div class="cap-bar"><i style="width:${use}%" class="${r.ok ? '' : 'over'}"></i></div>
+        <small>可帶 ${cap} 名，已帶 ${r.trainees} 名</small></td>
+      <td>${r.ok ? '<span class="pill valid">符合</span>' : `<span class="pill expired">不符合</span><br><small>尚需 ${r.needTeachers} 位有效教師</small>`}</td></tr>`;
+  };
+  const trend = keys.length < 2 ? '' : `<section class="card"><h3>各月趨勢</h3><div class="table-wrap"><table><thead><tr><th>月份</th><th>教師（有效認證）</th><th>學員</th><th>整體師生比</th><th>不符合的職類</th></tr></thead><tbody>
+    ${keys.map(x => { const m = months[x]; return `<tr><td>${label(x)}</td><td class="num">${m.totals.teachers}（${m.totals.teachersValid}）</td><td class="num">${m.totals.trainees}</td>
+      <td class="num">1 : ${m.totals.teachersValid ? Math.round(m.totals.trainees / m.totals.teachersValid * 100) / 100 : '—'}</td><td>${m.rows.filter(r => !r.ok).map(r => esc(r.prof)).join('、') || '—'}</td></tr>`; }).join('')}
+    </tbody></table></div></section>`;
+  $('content').innerHTML = `
+    <section class="card"><h3>師生比｜衛福部臨床醫事人員培訓計畫</h3>
+      <div class="filters" style="align-items:center"><label style="margin:0;font-weight:700">月份 <select id="rMonth" style="display:inline-block;width:auto;margin-left:6px">${keys.map(x => `<option value="${x}" ${x === k ? 'selected' : ''}>${label(x)}</option>`).join('')}</select></label>
+        <span class="hint" style="margin:0">評鑑標準：每位臨床教師至多帶 ${R} 名 PGY 學員（師生比至少 1:${R}）。教師認證以 ${esc(M.ref)} 為準。</span></div>
+    </section>
+    <section class="kpis">
+      <div class="kpi" style="--tone:${bad.length ? 'var(--crimson)' : 'var(--success)'}"><b class="num">${M.rows.length - bad.length} / ${M.rows.length}</b><span>職類符合 1:${R}</span></div>
+      <div class="kpi"><b class="num">${M.totals.teachers}</b><span>名單臨床教師</span></div>
+      <div class="kpi" style="--tone:var(--secondary)"><b class="num">${M.totals.trainees}</b><span>PGY 學員</span></div>
+      <div class="kpi" style="--tone:${invalid ? 'var(--warning)' : 'var(--success)'}"><b class="num">${invalid}</b><span>名單教師認證有問題</span></div>
+    </section>
+    ${invalid ? `<section class="card attention-card"><b>有 ${invalid} 位列在核定名單上的教師，在 ${esc(M.ref)} 沒有有效的醫策會臨床教師認證</b>（查無認證、已屆滿或教學年資不符合）。這些人不計入有效教師；評鑑時可能被認定不符。名單請見師培中心本機的「師生比核對」檔。</section>` : ''}
+    <section class="card"><h3>${label(k)}各職類師生比</h3>
+      <div class="table-wrap"><table><thead><tr><th>職類</th><th>名單教師</th><th>PGY 學員</th><th>師生比</th><th>帶教容量（有效教師 × ${R}）</th><th>1:${R}</th></tr></thead>
+      <tbody>${M.rows.map(row).join('')}</tbody></table></div>
+      <div class="note">師生比以「有效認證教師」計算。資料來源：${esc(M.file)}；教師認證比對：${esc(M.pecFile || '')}。</div></section>
+    ${trend}`;
+  $('rMonth').onchange = e => { state.ratioMonth = e.target.value; renderRatio(); };
 }
 
 // ---------- 名單 ----------

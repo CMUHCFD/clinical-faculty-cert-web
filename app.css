@@ -82,6 +82,13 @@ form input { display: block; width: 100%; margin-top: 4px; padding: 10px 12px; b
 .req-list li.met .bar i { background: var(--success); }
 .req-list small { color: var(--muted); }
 .req-card.big .req-label { font-size: 16px; } .req-card.big .req-num { font-size: 19px; }
+/* 師生比 */
+.cap-bar { height: 10px; background: #e8edf0; border-radius: 5px; overflow: hidden; margin-bottom: 3px; }
+.cap-bar i { display: block; height: 100%; background: var(--success); border-radius: 5px; } .cap-bar i.over { background: var(--danger); }
+tr.bad td { background: #FFF0F1; }
+small.warn { color: #b3261e; font-weight: 700; }
+.attention-card { border-left: 6px solid var(--warning); background: #FFFBE6; }
+
 /* 醫事職類新制四宮格（初次認證／展延 × 基礎／進階） */
 .grid4 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .g-head { border-radius: 10px 10px 4px 4px; padding: 10px 12px; display: grid; gap: 2px; }
