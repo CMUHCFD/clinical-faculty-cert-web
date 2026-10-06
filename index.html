@@ -6,7 +6,7 @@
   <meta name="robots" content="noindex, nofollow">
   <title>臨床教師認證</title>
   <!-- 版本號用來避免瀏覽器沿用舊的快取檔；更新程式時一併更換 -->
-  <link rel="stylesheet" href="app.css?v=20261007b">
+  <link rel="stylesheet" href="app.css?v=20261007c">
 </head>
 <body>
 
@@ -16,10 +16,19 @@
       <h1>臨床教師認證</h1>
       <p class="auth-sub">師資培育中心</p>
 
+      <!-- 主要入口：免登入查詢（多數同仁只需要查進度），與登入明確分開 -->
+      <div id="authMain">
+        <button id="goLookup" class="big-cta" type="button">
+          <svg class="cta-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M15.5 15.5L21 21" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+          <span class="cta-text"><b>查詢我的認證進度</b><small>免登入・輸入員工編號＋身分證後 4 碼</small></span>
+          <span class="cta-arrow" aria-hidden="true">›</span>
+        </button>
+
+        <div class="or"><span>師培中心、科部主管及已開通帳號者</span></div>
+
       <div class="tabs" role="tablist">
         <button id="tabLogin" class="tab is-active" role="tab" type="button">登入</button>
         <button id="tabActivate" class="tab" role="tab" type="button">開通帳號</button>
-        <button id="tabLookup" class="tab" role="tab" type="button">免登入查詢</button>
       </div>
 
       <form id="loginForm" autocomplete="on">
@@ -36,14 +45,19 @@
         <label>再輸入一次<input id="actPw2" type="password" minlength="8" autocomplete="new-password" required></label>
         <button class="btn btn-primary" type="submit">開通並登入</button>
       </form>
+      </div>
 
-      <form id="lookupForm" hidden autocomplete="off">
+      <div id="lookupPane" hidden>
+        <button id="lkBackLogin" class="btn-link" type="button">← 返回</button>
+        <h2 class="lk-pane-title">查詢我的認證進度</h2>
+      <form id="lookupForm" autocomplete="off">
         <p class="hint">不用帳號，即可查詢自己的認證狀態、效期、點數與修課紀錄（唯讀）。</p>
         <label>員工編號<input id="lkEmp" type="text" required></label>
         <label>身分證字號（或居留證號）最後 4 碼<input id="lkLast4" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" required autocomplete="off"></label>
         <button class="btn btn-primary" type="submit">查詢我的進度</button>
         <p class="hint">連續輸入錯誤 5 次會暫停查詢一段時間。</p>
       </form>
+      </div>
 
       <p id="authMsg" class="msg" role="alert"></p>
     </div>
@@ -76,7 +90,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-  <script src="config.js?v=20261007b"></script>
-  <script src="app.js?v=20261007b"></script>
+  <script src="config.js?v=20261007c"></script>
+  <script src="app.js?v=20261007c"></script>
 </body>
 </html>

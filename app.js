@@ -49,14 +49,21 @@ function showAuth(msg, ok) {
   $('appView').hidden = true; $('authView').hidden = false;
   $('authMsg').textContent = msg || ''; $('authMsg').className = 'msg' + (ok ? ' ok' : '');
 }
+// 登入頁兩條路：大按鈕「查詢我的認證進度」（免登入）／下方的登入、開通帳號
 function setTab(which) {
-  const tabs = { login: ['tabLogin', 'loginForm'], activate: ['tabActivate', 'activateForm'], lookup: ['tabLookup', 'lookupForm'] };
-  Object.entries(tabs).forEach(([k, [t, f]]) => { if (!$(t) || !$(f)) return; $(t).classList.toggle('is-active', k === which); $(f).hidden = k !== which; });
+  const lookup = which === 'lookup';
+  if ($('authMain') && $('lookupPane')) { $('authMain').hidden = lookup; $('lookupPane').hidden = !lookup; }
+  if (!lookup) {
+    $('tabLogin').classList.toggle('is-active', which === 'login'); $('tabActivate').classList.toggle('is-active', which === 'activate');
+    $('loginForm').hidden = which !== 'login'; $('activateForm').hidden = which !== 'activate';
+  }
   $('authMsg').textContent = '';
+  if (lookup && $('lkEmp')) setTimeout(() => $('lkEmp').focus(), 0);
 }
 $('tabLogin').onclick = () => setTab('login');
 $('tabActivate').onclick = () => setTab('activate');
-if ($('tabLookup')) $('tabLookup').onclick = () => setTab('lookup');
+if ($('goLookup')) $('goLookup').onclick = () => setTab('lookup');
+if ($('lkBackLogin')) $('lkBackLogin').onclick = () => setTab('login');
 
 // ---------- 免登入進度查詢：員工編號＋身分證後 4 碼 → 唯讀的個人頁 ----------
 if ($('lookupForm')) $('lookupForm').onsubmit = async e => {
