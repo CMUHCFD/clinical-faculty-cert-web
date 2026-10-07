@@ -54,11 +54,15 @@ form input { display: block; width: 100%; margin-top: 4px; padding: 10px 12px; b
 
 /* 版面 */
 .topbar { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding: 10px 16px; background: var(--primary-dark); color: #fff; }
-.brand { font-weight: 800; font-size: 16px; display: flex; align-items: center; gap: 10px; }
+.brand { font-weight: 800; font-size: 16px; display: flex; align-items: center; gap: 10px; white-space: nowrap; }
 .brand-mark { width: 36px; height: 36px; background: #fff; border-radius: 50%; padding: 2px; flex: 0 0 auto; }
 .nav { display: flex; gap: 4px; flex: 1; flex-wrap: wrap; }
 .nav button { border: 0; background: transparent; color: #cfe3ee; padding: 6px 12px; border-radius: 8px; font-weight: 700; cursor: pointer; }
 .nav button.is-active { background: rgba(255,255,255,.16); color: #fff; }
+.emp-search { display: flex; gap: 4px; align-items: center; }
+.emp-search input { width: 190px; padding: 7px 10px; border: 0; border-radius: 8px; font-size: 14px; }
+.emp-search .btn { width: auto; padding: 7px 12px; background: var(--secondary); color: #fff; border: 0; }
+@media (max-width: 640px) { .emp-search { order: 3; width: 100%; } .emp-search input { flex: 1; width: auto; } }
 .who { display: flex; align-items: center; gap: 10px; font-size: 13px; }
 .who .btn-ghost { color: #fff; border-color: rgba(255,255,255,.4); }
 #lookupView .brand { flex: 1; }   /* 免登入查詢沒有選單，把「結束查詢」推到右側 */

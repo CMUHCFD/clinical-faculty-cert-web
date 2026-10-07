@@ -140,7 +140,7 @@ function lookupHTML(r) {
       <div class="lk-who">${esc(r.name || '')}<small>${esc(r.emp_id)}｜${esc(r.staff?.dept || '')}｜${esc(r.staff?.profession || '')}</small></div>
       <div class="lk-status">${esc(plain(d.status))}</div>
       <div class="lk-reason">${esc(d.statusReason || '')}</div>
-      <span class="tag ${d.regime === 'legacy' ? 'legacy' : ''}">適用：${esc(d.regimeLabel || '')}</span>
+      ${certTrack ? `<span class="tag ${d.regime === 'legacy' ? 'legacy' : ''}">適用：${esc(d.regimeLabel || '')}</span>` : ''}
     </section>
     <section class="lk-tiles">
       <div class="card lk-tile"><h3>認證效期</h3>${validity}</div>
@@ -201,7 +201,7 @@ function lookupHTML(r) {
 
   const dn = r.regime === 'new' ? d : r.row.detail_new;
   const grid = certTrack ? newGrid(dn, { big: true, title: r.regime === 'new' ? '新制認證進度' : `${(d.newRulePreview && d.newRulePreview.appliesFrom) || 116} 年起改採新制：進度試算` }) : '';
-  return `<div class="lk">${hero}${reqCard(d, { big: true })}${appraisalCard(d, { big: true })}${grid}${next}${detail}${grid ? '' : preview}${apps}</div>`;
+  return `<div class="lk">${hero}${reqCard(d, { big: true })}${appraisalCard(d, { big: true })}${grid}${next}${facultyCard(d, { big: true })}${detail}${grid ? '' : preview}${apps}</div>`;
 }
 function endLookup() {
   clearTimeout(state.lkTimer);
@@ -232,6 +232,17 @@ $('activateForm').onsubmit = async e => {
     $('activateForm').reset();
     await signIn(emp, pw);
   } catch (err) { showAuth('無法連線到開通服務，請稍後再試。'); }
+};
+// 以員工編號查個人進度（師培中心：全院；科部主管：資料列權限只回傳所屬科部人員）
+if ($('empSearch')) $('empSearch').onsubmit = async e => {
+  e.preventDefault();
+  const q = $('empQ').value.trim().replace(/[%_\\,()]/g, '');
+  if (!q) return;
+  const { data, error } = await sb.from('cert_status').select('emp_id').ilike('emp_id', q).limit(1);
+  if (error) return toast('查詢失敗：' + error.message, false);
+  if (!data || !data.length) return toast(`查無員工編號 ${q}${state.role === 'dept_coordinator' ? '，或此人不在您的科部範圍' : ''}。`, false);
+  $('empQ').value = ''; $('empQ').blur();
+  go('person', data[0].emp_id);
 };
 $('logoutBtn').onclick = async () => { await sb.auth.signOut(); state.me = null; state.roster = null; $('content').innerHTML = ''; showAuth(); };
 if ($('pwBtn')) $('pwBtn').onclick = () => {   // 頁面快取尚未更新時可能還沒有這顆按鈕
@@ -407,6 +418,7 @@ async function boot() {
   if (isAdmin() || state.role === 'dept_coordinator') views.push(['roster', '追蹤名單'], ['ratio', '師生比']);
   if (state.role === 'super_admin') views.push(['admin', '管理']);
   $('nav').innerHTML = views.map(([v, t]) => `<button type="button" data-view="${v}">${t}</button>`).join('');
+  if ($('empSearch')) $('empSearch').hidden = !(isAdmin() || state.role === 'dept_coordinator');
   $('nav').querySelectorAll('button').forEach(b => { b.onclick = () => go(b.dataset.view); });
 
   // 掃描簽到 QR 進來的連結：登入後直接完成簽到
@@ -516,6 +528,19 @@ function newGrid(dn, o = {}) {
     ${susp}<div class="grid4">${iniHead}${renHead}${iniBasic}${renBasic}${iniAdv}${renAdv}</div>${uncls}</section>`;
 }
 
+// 主治醫師申請教職新聘／升等的時數檢核（申請前三年內教學能力提升、前一年度師培總點數）
+function facultyCard(d, o = {}) {
+  const f = d.facultyCheck;
+  if (!f) return '';
+  return `<section class="card req-card ${o.big ? 'big' : ''}"><h3>申請教職新聘／升等的時數檢核</h3>
+    <p class="hint">若今年要申請教職新聘或升等，需同時符合下列兩項（以今天為申請日試算）。</p>
+    <ul class="req-list">${f.items.map(q => `<li class="${q.met ? 'met' : ''}"><div class="req-top"><span class="req-mark">${q.met ? '✓' : '○'}</span><span class="req-label">${esc(q.label)}</span>
+      <span class="req-num num">${q.have} / ${q.need} ${esc(q.unit)}</span></div>
+      <div class="bar"><i style="width:${Math.min(100, q.have / q.need * 100)}%"></i></div>
+      <small>${q.met ? '已符合' : `還差 ${Math.round((q.need - q.have) * 10) / 10} ${esc(q.unit)}`}</small></li>`).join('')}</ul>
+    <div class="note">${f.met ? '目前已符合申請教職的師培時數條件。' : '尚未符合；請在送件前補足。'}三年內的時數以今天往回 ${f.windowMonths} 個月計算。</div></section>`;
+}
+
 // 主治醫師年度考核分數：上課時數 → 基本分（級距中標出目前所在級）＋核心教師認證課程加分
 function appraisalCard(d, o = {}) {
   const a = d.appraisal;
@@ -580,7 +605,7 @@ function personHTML(o) {
   const hero = `
     <section class="card hero tone-${esc(d.statusCode)}">
       ${back ? `<button class="btn-link" type="button" onclick="go('${state.backTo || 'dept'}')">← 返回</button><br>` : ''}
-      <span class="tag ${d.regime === 'legacy' ? 'legacy' : ''}">目前適用：${esc(d.regimeLabel)}</span>
+      ${certTrack ? `<span class="tag ${d.regime === 'legacy' ? 'legacy' : ''}">目前適用：${esc(d.regimeLabel)}</span>` : ''}
       <div class="status">${esc(d.status)}</div>
       <div class="rule">${esc(d.trackLabel)}</div>
       <div class="rule">員工編號 ${o.lookup ? `${esc(empId)} <span class="nm">${esc(o.name || '')}</span>` : empLabel(empId)}｜${esc(staff?.dept || '')}｜${esc(staff?.title || '')}｜${esc(staff?.profession || '')}${cert ? `｜認證效期 ${esc(cert.valid_start_roc)}–${esc(cert.valid_end_roc)}` : ''}</div>
@@ -677,7 +702,7 @@ function personHTML(o) {
   // 醫事職類：以新制四宮格取代「新制試算」與「九大項目」兩張卡（舊制期間顯示為新制試算）
   const dn = o.regime === 'new' ? d : row.detail_new;
   const grid = certTrack ? newGrid(dn, { title: o.regime === 'new' ? '新制認證進度' : `${(d.newRulePreview && d.newRulePreview.appliesFrom) || 116} 年起改採新制：進度試算` }) : '';
-  return hero + meters + appraisalCard(d) + next + (grid || preview) + years + (grid ? '' : items) + appList + recs;   // 結論 → 我的身分要完成什麼 → 下一步 → 細節
+  return hero + meters + appraisalCard(d) + next + facultyCard(d) + (grid || preview) + years + (grid ? '' : items) + appList + recs;   // 結論 → 我的身分要完成什麼 → 下一步 → 細節
 }
 
 // 認證規範頁：主治醫師年度考核分數的計分方式
@@ -720,7 +745,10 @@ async function renderRules() {
     <div class="note">先依「執登職類」判定是否為醫師（持西醫師、中醫師或牙醫師執照者一律歸為醫師），再依職稱分身分：
       第一、二年住院醫師 → 住院醫師（第一、二年）；第三年以上住院醫師、總醫師 → 住院醫師（第三年以上）；研究醫師、完訓醫師 → 研究醫師／完訓醫師；主治醫師、主任等 → 主治醫師。
       PGY 醫師不在第四條所列身分，不列管；沒有本院執登資料者（兼任、代訓醫師等）依執登職類不屬醫師，也不列管。
-      符合當年度時數規範者，即為當年度臨床教師。</div>
+      符合當年度時數規範者，即為當年度臨床教師。<b>醫師不分舊制、新制</b>，一律依上表每年完成。</div>
+    ${ph.faculty_promotion ? `<h4 style="margin:16px 0 6px">主治醫師申請教職新聘／升等</h4>
+      <ul class="recs"><li>申請前三年內完成「教學能力提升」至少 <b>${ph.faculty_promotion.prior_three_years_teaching_hours ?? 3}</b> 小時</li>
+      <li>申請前一年度完成師培總點數至少 <b>${ph.faculty_promotion.prior_one_year_total_hours ?? 4}</b> 點</li></ul>` : ''}
     ${apprRules(ph.vs_appraisal, myCat === 'vs')}</section>`;
 
   const seniorityRows = (R.professions || []).map(p => `<tr${here(myProf && (p.name === myProf))}><td>${esc(p.name)}</td><td class="num">${p.seniority_years} 年</td><td class="num">${p.training_eligibility_years} 年</td></tr>`).join('');
