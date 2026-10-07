@@ -108,6 +108,38 @@ form input { display: block; width: 100%; margin-top: 4px; padding: 10px 12px; b
 .lect-sum > div { background: #EEF7EC; border-radius: 10px; padding: 10px; display: grid; justify-items: center; }
 .lect-sum b { font-size: 26px; color: #3F8233; } .lect-sum span { font-size: 12.5px; color: var(--muted); }
 
+.person-name { font-size: 22px; font-weight: 800; color: var(--primary-dark); margin-bottom: 6px; }
+.person-name small { display: block; font-size: 13.5px; font-weight: 400; color: var(--muted); }
+
+/* 職類別管理人：監測單位 */
+.scope-card { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; border-left: 5px solid var(--primary); }
+.unit-list { max-height: 50vh; overflow: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 4px 12px; border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+.unit { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 400; margin: 0; padding: 4px; border-radius: 6px; }
+.unit:hover { background: var(--bg); } .unit input { width: auto; margin: 0; } .unit span { flex: 1; } .unit small { color: var(--muted); }
+
+/* 訓練計畫書 */
+.plan-head h3 input { width: 100%; border: 1px solid transparent; border-radius: 6px; padding: 4px 6px; }
+.plan-head h3 input:not(:disabled):hover, .plan-head h3 input:focus { border-color: var(--line); }
+.plan-sec > summary { cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 4px 0; }
+.plan-sec > summary b { font-size: 17px; color: var(--primary-dark); }
+.plan-sec { background: var(--card); border-radius: var(--radius); padding: 14px 16px; box-shadow: 0 1px 3px rgba(22,70,97,.08); }
+.plan-item { border-top: 1px solid var(--line); padding: 10px 0; }
+.plan-item.done .plan-check b { color: #2b7a6b; }
+.plan-check { display: flex; align-items: center; gap: 8px; margin: 0 0 2px; font-size: 15px; }
+.plan-check input { width: auto; margin: 0; }
+.plan-item textarea { width: 100%; border: 1.5px solid var(--line); border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 14px; resize: vertical; }
+.plan-leaders { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px 16px; margin: 8px 0; }
+.plan-leaders small { display: block; color: var(--muted); font-weight: 400; margin-top: 4px; }
+.plan-auto { background: #F6FAFC; border: 1px dashed var(--sky); border-radius: 10px; padding: 10px 12px; margin: 8px 0; }
+.plan-tlist > summary { cursor: pointer; font-weight: 700; margin: 10px 0 6px; }
+@media print {
+  .topbar, .foot, .filters button, .btn-link, #toast, .plan-tlist button { display: none !important; }
+  body { background: #fff; } .content { max-width: none; padding: 0; }
+  details.plan-sec, details.plan-tlist { display: block; } details:not([open]) > *:not(summary) { display: block; }
+  .card, .plan-sec { box-shadow: none; break-inside: avoid-page; }
+  textarea { border: 0 !important; resize: none; overflow: visible; }
+}
+
 /* 他院轉任 */
 details.transfer > summary { cursor: pointer; display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: baseline; }
 details.transfer > summary b { color: var(--primary-dark); }

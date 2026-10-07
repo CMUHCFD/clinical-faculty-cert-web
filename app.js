@@ -305,7 +305,7 @@ const colsFor = d => `emp_id,dept,computed_at,status_code:${d}->>statusCode,stat
   `gap_b:${d}->>gapBasicHours,gap_a:${d}->>gapAdvancedHours,cp:${d}->>compliant,grace:${d}->renewal->>inGrace,` +
   `rg:${d}->>regime,wy:${d}->window->years,wl:${d}->window->>label,le:${d}->lastCertificate->>valid_end,` +
   `new_ok:detail->newRulePreview->>wouldQualify,new_reason:detail->newRulePreview->>statusReason,cat:${d}->>categoryName,` +
-  `tot:${d}->>totalHours,score:${d}->appraisal->>score,sbase:${d}->appraisal->>base,staff(title,profession)`;
+  `tot:${d}->>totalHours,score:${d}->appraisal->>score,sbase:${d}->appraisal->>base,staff(*)`;   // staff(*) 含姓名（008 起）
 // 名單上的「點數」：醫師等每年規範看總點數（一般醫學＋教學能力提升），認證教師看教學能力提升
 const hoursOf = r => (r.track_type === 'physician' || r.track_type === 'annual' ? r.tot : r.teach);
 const scorePill = r => r.score == null ? '' : ` <span class="pill ${Number(r.sbase) >= 10 ? 'valid' : Number(r.sbase) >= 5 ? 'eligible' : Number(r.sbase) >= 0 ? 'expiring' : 'expired'}" title="主治醫師年度考核分數">考核 ${esc(r.score)} 分</span>`;
@@ -366,7 +366,12 @@ async function togglePec(emp, remove) {
   state.pecEx = (data && data.value) || {};
   renderPerson(emp, state.view === 'person');
 }
-const nameOf = emp => (state.roster && state.roster.get(String(emp).toLowerCase()) || {}).name || '';
+// 姓名：雲端 staff.name（008 起）；師培中心若另外選了本機名冊，也可對照
+const nameOf = emp => (state.names && state.names.get(String(emp).toLowerCase())) || (state.roster && state.roster.get(String(emp).toLowerCase()) || {}).name || '';
+const rememberNames = rows => {
+  state.names = state.names || new Map();
+  (rows || []).forEach(r => { const n = (r.staff && r.staff.name) || r.name; if (n && r.emp_id) state.names.set(String(r.emp_id).toLowerCase(), n); });
+};
 const empLabel = emp => `${esc(emp)}${nameOf(emp) ? ` <span class="nm">${esc(nameOf(emp))}</span>` : ''}`;
 const nameBtn = () => (isAdmin() || state.role === 'dept_coordinator')
   ? `<button class="btn btn-ghost" type="button" onclick="showNames()" title="姓名不存放在雲端；選擇您電腦上的員工名冊後，只在這個瀏覽器分頁內對照顯示">${state.roster ? '已顯示姓名' : '顯示姓名'}</button>` : '';
@@ -391,7 +396,7 @@ async function loadList(force) {
   if (force || !state.list) {
     const rows = await fetchAll(() => sb.from('cert_status').select(listCols()).order('emp_id'));
     rows.forEach(r => { r.can_apply = r.ie === 'true' || r.rc === 'true'; if (state.regime === 'new') r.new_ok = null; });
-    state.list = rows;
+    state.list = rows; rememberNames(rows);
   }
   if (state.list[0]) $('asOf').textContent = fmtTime(state.list[0].computed_at);
   return state.list;
@@ -414,10 +419,10 @@ async function boot() {
   const { data: { session } } = await sb.auth.getSession();
   if (!session) { if (location.hash === '#lookup') setTab('lookup'); return showAuth(); }
   state.list = null;   // 換帳號登入時不得沿用上一位的名單
-  const { data: profile } = await sb.from('profiles').select('emp_id,role,scope_dept,disabled').eq('user_id', session.user.id).maybeSingle();
+  const { data: profile } = await sb.from('profiles').select('*').eq('user_id', session.user.id).maybeSingle();   // 含職類別管理範圍（008）
   if (!profile || profile.disabled) { await sb.auth.signOut(); return showAuth('此帳號無法使用，請洽師培中心。'); }
   const [{ data: staff }, { data: setting }] = await Promise.all([
-    sb.from('staff').select('emp_id,dept,title,profession').eq('emp_id', profile.emp_id).maybeSingle(),
+    sb.from('staff').select('*').eq('emp_id', profile.emp_id).maybeSingle(),
     sb.from('settings').select('value').eq('key', 'rules').maybeSingle()
   ]);
   const { data: exRow } = await sb.from('settings').select('value').eq('key', 'pec_exclusions').maybeSingle();
@@ -427,14 +432,15 @@ async function boot() {
   state.rules = setting ? setting.value : {};
   state.regime = regimeOf(state.rules).active;
   $('authView').hidden = true; $('appView').hidden = false;
-  $('whoText').textContent = `${state.me.emp_id}｜${ROLE_LABEL[state.role]}`;
+  const scopeLabel = state.role === 'dept_coordinator' ? (state.me.scope_profession ? `｜${state.me.scope_profession}職類` : state.me.scope_dept ? `｜${state.me.scope_dept}` : '') : '';
+  $('whoText').textContent = `${state.me.emp_id}${state.me.name ? ' ' + state.me.name : ''}｜${ROLE_LABEL[state.role]}${scopeLabel}`;
 
   const views = [];
   if (isAdmin()) views.push(['all', '全院總覽'], ['expiry', '到期與提報'], ['dept', '名單查詢']);
   if (state.role === 'dept_coordinator') views.push(['dept', '科部總覽'], ['expiry', '到期與提報']);
   views.push(['mine', '我的認證'], ['courses', '課程'], ['rules', '認證規範']);
   if (isAdmin()) views.push(['review', '審查']);
-  if (isAdmin() || state.role === 'dept_coordinator') views.push(['roster', '追蹤名單'], ['ratio', '師生比']);
+  if (isAdmin() || state.role === 'dept_coordinator') views.push(['plan', '訓練計畫'], ['roster', '追蹤名單'], ['ratio', '師生比']);
   if (state.role === 'super_admin') views.push(['admin', '管理']);
   $('nav').innerHTML = views.map(([v, t]) => `<button type="button" data-view="${v}">${t}</button>`).join('');
   if ($('empSearch')) $('empSearch').hidden = !(isAdmin() || state.role === 'dept_coordinator');
@@ -458,7 +464,7 @@ function go(view, arg) {
   $('nav').querySelectorAll('button').forEach(b => b.classList.toggle('is-active', b.dataset.view === view));
   $('content').innerHTML = '<div class="card empty">載入中…</div>';
   const run = { mine: () => renderPerson(state.me.emp_id), person: () => renderPerson(arg, true), dept: renderList, all: renderOverview,
-    courses: renderCourses, rules: renderRules, ratio: renderRatio, review: renderReview, roster: renderRoster, admin: renderAdmin, expiry: renderExpiry }[view];
+    courses: renderCourses, rules: renderRules, ratio: renderRatio, plan: () => { state.planId = arg || null; return renderPlanPage(); }, review: renderReview, roster: renderRoster, admin: renderAdmin, expiry: renderExpiry }[view];
   // 連續快速切換頁面時，較早的頁面可能較晚才載完而蓋掉畫面：發現過期就重畫目前頁面
   const token = state.nav = (state.nav || 0) + 1;
   state.arg = arg;
@@ -689,7 +695,7 @@ async function renderPerson(empId, back) {
   const own = empId === state.me.emp_id;
   const [{ data: row, error }, { data: staff }, { data: records }, { data: apps }, { data: upcoming }, { data: myRegs }] = await Promise.all([
     sb.from('cert_status').select('*').eq('emp_id', empId).maybeSingle(),
-    sb.from('staff').select('emp_id,dept,title,profession').eq('emp_id', empId).maybeSingle(),
+    sb.from('staff').select('*').eq('emp_id', empId).maybeSingle(),
     sb.from('course_records').select('course_title,course_date,category,teaching_hours,general_hours').eq('emp_id', empId).order('course_date', { ascending: false }).limit(500),
     sb.from('applications').select('*').eq('emp_id', empId).order('submitted_at', { ascending: false }).limit(10),
     sb.from('courses').select('id,title,course_date,start_time,hours,main_category,sub_categories,location_detail').gte('course_date', today()).order('course_date').limit(20),
@@ -697,6 +703,7 @@ async function renderPerson(empId, back) {
   ]);
   if (error) throw error;
   if (!row) { $('content').innerHTML = '<div class="card empty">尚無此人員的認證資料。</div>'; return; }
+  if (staff && staff.name) rememberNames([{ emp_id: empId, name: staff.name }]);
   $('asOf').textContent = fmtTime(row.computed_at);
   $('content').innerHTML = personHTML({ empId, back, own, row, staff, records, apps, upcoming, myRegs,
     regime: state.regime, role: state.role, admin: isAdmin(), canAct: own || isAdmin() || state.role === 'dept_coordinator' });
@@ -719,6 +726,7 @@ function personHTML(o) {
   const hero = `
     <section class="card hero tone-${esc(d.statusCode)}">
       ${back ? `<button class="btn-link" type="button" onclick="go('${state.backTo || 'dept'}')">← 返回</button><br>` : ''}
+      <div class="person-name">${esc(staff?.name || nameOf(empId) || empId)}<small>${esc(empId)}｜${esc(staff?.dept || '')}｜${esc(staff?.title || '')}</small></div>
       ${certTrack ? `<span class="tag ${d.regime === 'legacy' ? 'legacy' : ''}">目前適用：${esc(d.regimeLabel)}</span>` : ''}${d.transferredFrom ? ` <span class="tag transfer-tag">他院轉任：${esc(d.transferredFrom)}</span>` : ''}
       <div class="status">${esc(d.status)}</div>
       <div class="rule">${esc(d.trackLabel)}</div>
@@ -962,6 +970,201 @@ async function renderRatio() {
   $('rMonth').onchange = e => { state.ratioMonth = e.target.value; renderRatio(); };
 }
 
+// ---------- 職類別管理人：勾選要監測的單位（例如護理職類管理人勾選護理單位） ----------
+async function openUnitPicker() {
+  let data;
+  try { data = await api('scope.units'); } catch (err) { return toast(err.message, false); }
+  let dlg = $('unitDlg');
+  if (!dlg) { dlg = document.createElement('dialog'); dlg.id = 'unitDlg'; document.body.appendChild(dlg); }
+  const sel = new Set(data.selected || []);
+  const total = data.units.reduce((a, u) => a + u.n, 0);
+  dlg.innerHTML = `<div class="dlg-body"><div class="dlg-head"><h3>設定監測單位｜${esc(data.profession)}職類</h3><button class="btn btn-ghost" type="button" onclick="$('unitDlg').close()">關閉</button></div>
+    <p class="hint">勾選您要監測的單位；全部不勾＝監測所有 ${data.units.length} 個有${esc(data.profession)}執登人員的單位（共 ${total} 人）。名單、總覽、到期與提報、訓練計畫的教師名單都會依此範圍顯示。</p>
+    <div class="filters"><input id="uQ" type="search" placeholder="搜尋單位名稱" style="flex:1">
+      <button class="btn btn-ghost" type="button" id="uAll">全選（目前篩選）</button><button class="btn btn-ghost" type="button" id="uNone">全部取消</button></div>
+    <div id="uList" class="unit-list"></div>
+    <div class="filters" style="justify-content:space-between;align-items:center;margin-top:10px"><span id="uCount" class="num"></span>
+      <button class="btn btn-primary" style="width:auto" type="button" id="uSave">儲存監測單位</button></div></div>`;
+  const draw = () => {
+    const q = $('uQ').value.trim();
+    const list = data.units.filter(u => !q || u.dept.includes(q));
+    $('uList').innerHTML = list.map(u => `<label class="unit"><input type="checkbox" value="${esc(u.dept)}" ${sel.has(u.dept) ? 'checked' : ''}><span>${esc(u.dept)}</span><small>${u.n} 人</small></label>`).join('') || '<div class="empty">沒有符合的單位</div>';
+    $('uList').querySelectorAll('input').forEach(i => { i.onchange = () => { i.checked ? sel.add(i.value) : sel.delete(i.value); count(); }; });
+    count();
+  };
+  const count = () => { $('uCount').textContent = sel.size ? `已勾選 ${sel.size} 個單位（${data.units.filter(u => sel.has(u.dept)).reduce((a, u) => a + u.n, 0)} 人）` : `未勾選＝全部 ${data.units.length} 個單位`; };
+  $('uQ').oninput = draw;
+  $('uAll').onclick = () => { const q = $('uQ').value.trim(); data.units.filter(u => !q || u.dept.includes(q)).forEach(u => sel.add(u.dept)); draw(); };
+  $('uNone').onclick = () => { sel.clear(); draw(); };
+  $('uSave').onclick = async () => {
+    const d = await act('scope.setUnits', { units: [...sel] });
+    if (!d) return;
+    state.me.scope_units = sel.size ? [...sel] : null; state.list = null; state.alts = {};
+    dlg.close(); go(state.view, state.arg);
+  };
+  draw(); dlg.showModal();
+}
+const scopeCard = () => state.role === 'dept_coordinator' && state.me.scope_profession ? `<section class="card scope-card">
+  <div><b>監測範圍：${esc(state.me.scope_profession)}職類</b>　${(state.me.scope_units || []).length ? `已勾選 ${state.me.scope_units.length} 個單位` : '所有單位'}</div>
+  <button class="btn btn-ghost" type="button" onclick="openUnitPicker()">設定監測單位</button></section>` : '';
+
+// ---------- 訓練計畫書：依 PEC「訓練計畫書模板」九大項目填寫；教師部分由系統帶入 ----------
+const PLAN_TEMPLATE = [
+  { k: '1', t: '一、計畫書格式規範', items: [
+    ['1A', '標題', '標題清楚標示學年度、訓練單位與層級'], ['1B', '定稿及修訂會議日期', '計畫書須經正式會議（如 PEC 或科部會議）通過，封面標示會議日期及名稱'],
+    ['1C', '計畫主持人', '含子計畫主持人（選填）、教學負責人（協助計畫主持人執行訓練計畫的主要負責人）'], ['1D', '目錄、版次、格式排版', '目錄與版次依本院規範；字體、邊界、行寬等格式一致'] ] },
+  { k: '2', t: '二、訓練目標與架構', items: [
+    ['2A', '訓練宗旨及具體目標', '符合該職類公告之專業核心能力（如 ACGME 六大核心能力）'], ['2B', '核心能力理論架構', '導入明確之核心能力框架，如 milestone 或 EPA 指標'],
+    ['2C', '訓練計畫執行架構', '清楚標示部門組織分工與跨部門組織'] ] },
+  { k: '3', t: '三、教學師資', teachers: true, items: [
+    ['3A', '計畫主持人', '揭露主持人之臨床教學資歷、學術表現、教師認證資格及工作說明'], ['3B', '教學負責人', '揭露教學負責人之臨床教學資歷、學術表現、教師認證資格及工作說明'],
+    ['3C', '教師名單（專長、職責、認證）', '以表格陳列所有教師名單、資格及認證；註明臨床、學術與教學專長；教師群明確分工（導師、研究指導、困難輔導等）；註明院內外教師認證'],
+    ['3D', '教師發展', '所有教師需符合臨床教師資格並持續接受師資培育課程'], ['3E', '其他人員', '說明行政人員、技術員等在訓練計畫中的角色'] ] },
+  { k: '4', t: '四、教學資源', items: [
+    ['4A', '硬體設備', '機構共享（臨床技能中心、圖書館、數位教材室）與科內專屬（會議室、檢查室、電腦、投影設備、教具）'],
+    ['4B', '學習教材', '機構共享與科內專屬之專書、期刊、數位教材、核心課程影片、E-portfolio、學習平台'] ] },
+  { k: '5', t: '五、醫學與專業能力訓練方式（MK & PC & ICS）', items: [
+    ['5A', '專業領域核心課程及活動', '多元學習方式（課室、模擬、數位混成）；包含專業與一般醫學（感染管制、實證醫學等）'],
+    ['5B', '專業領域臨床實作與輪訓', '單位輪訓規劃、足夠案例種類與數目、多元臨床場域、明確指導授權與監督機制'],
+    ['5C', '跨領域團隊照護訓練', '全院型活動與跨職類或場域之教學活動（如 TRM、跨領域教案討論）'] ] },
+  { k: '6', t: '六、全人照顧能力訓練方式（PROF & SBP & PBLD）', items: [
+    ['6A', '醫療品質與病人安全課程', '全院或科部醫品病安課程、團隊會議（M&M、QA）、模擬課程'], ['6B', '醫學倫理與法律課程', '相關課程、案例討論與反思、模擬課程'],
+    ['6C', '全人照護訓練', '靈性、性別、韌性等課程與案例討論'], ['6D', '其他能力', '教學能力提升、行政能力提升、臨床研究提升'] ] },
+  { k: '7', t: '七、考評機制與反映管道', items: [
+    ['7A', '以能力為本的評量藍圖', '以圖表將各類評量工具對應於各種核心能力'], ['7B', '形成性評量', '評量工具與頻率（如 Mini-CEX、DOPS、CbD）'],
+    ['7C', '總結性評量', '評量工具與頻率（如口試、筆試、OSCE）'], ['7D', '雙向溝通或回饋方式', '機構、計畫主持人、導師三個層級的座談、滿意度調查等'],
+    ['7E', '臨床能力委員會（CCC）', '組成方式與頻率；至少每半年以多元評量評估學員核心能力（milestone 或 EPA）'], ['7F', '訓練計畫評估委員會（PEC）', '組成方式；至少每年一次'] ] },
+  { k: '8', t: '八、輔導與補強機制', items: [
+    ['8A', '學習成效不佳之定義與輔導', '學習時數、案例種類不足或學習成效不佳的定義與輔導機制'],
+    ['8B', '教學成效不佳之定義與輔導', '教師定期多元評量（學員書面回饋、滿意度、教學貢獻、優良教師選拔、研究表現），至少每年一次確認評估；教學成效不佳之輔導機制'],
+    ['8C', '個人化學習計畫（ILP）', '學員學習不佳、輔導後之個人化學習計畫'] ] },
+  { k: '9', t: '九、其他', items: [
+    ['9A', '作業與評量表單', '呈現於附件'], ['9B', '計畫書修改與精進', '訓練計畫年度報告（APE）、計畫書修改內容、教學精進專案（PDCA）'],
+    ['9C', '特色教學課程', '特色教學活動、多元學習方式與課程主題'] ] }
+];
+const PLAN_ITEMS = PLAN_TEMPLATE.flatMap(s => s.items.map(i => i[0]));
+const planDone = c => PLAN_ITEMS.filter(k => c && c.items && c.items[k] && c.items[k].done).length;
+const myScopeKey = () => state.me.scope_profession ? `prof:${state.me.scope_profession}` : `dept:${state.me.scope_dept || state.me.dept}`;
+const scopeName = key => key.startsWith('prof:') ? `${key.slice(5)}職類` : key.slice(5);
+const PLAN_STATUS_PILL = { 草稿: 'expiring', 送審中: 'eligible', 已通過: 'valid', 退回修改: 'expired' };
+
+// 系統帶入：計畫範圍內的教師（有效臨床教師認證或醫師本年度達標）與教師發展指標
+async function planTeachers(plan) {
+  const c = plan.content || {};
+  const build = () => {   // 每頁重新建立查詢（查詢物件不可重複使用）
+    let q = sb.from('cert_status').select('emp_id,dept,status_code,track_type,ve:detail->activeCertificate->>valid_end_roc,teach:detail->>teachingHours,' +
+      'tot:detail->>totalHours,ok:detail->>compliant,core:detail->coreCourses,lect:detail->lecturer->>totalHours,staff!inner(name,title,profession)');
+    if (plan.scope_key.startsWith('prof:')) {
+      q = q.eq('staff.profession', plan.scope_key.slice(5));
+      if ((c.scope_units || []).length) q = q.in('dept', c.scope_units);
+    } else q = q.like('dept', `${plan.scope_key.slice(5)}%`);
+    return q.order('emp_id');
+  };
+  const rows = await fetchAll(build);
+  rememberNames(rows);
+  const teachers = rows.filter(r => r.ve || (r.track_type === 'physician' && r.ok === 'true'));
+  return { all: rows, teachers };
+}
+
+async function renderPlanPage() {
+  if (isAdmin() && !state.planId) return renderPlanList();
+  const year = Number(today().slice(0, 4)) - 1911;
+  let plan;
+  if (state.planId) {
+    const { data } = await sb.from('training_plans').select('*').eq('id', state.planId).maybeSingle();
+    plan = data;
+  } else {
+    const { data } = await sb.from('training_plans').select('*').eq('academic_year', year).eq('scope_key', myScopeKey()).maybeSingle();
+    plan = data || { academic_year: year, scope_key: myScopeKey(), title: `${year} 學年度${scopeName(myScopeKey())}訓練計畫書`, content: { items: {} }, status: '草稿',
+      _new: true };
+    if (!plan.content.scope_units && state.me.scope_units) plan.content.scope_units = state.me.scope_units;
+  }
+  if (!plan) { $('content').innerHTML = '<div class="card empty">找不到計畫書。</div>'; return; }
+  const editable = !isAdmin() ? !['送審中', '已通過'].includes(plan.status) : true;
+  const c = plan.content || {}; c.items = c.items || {};
+  const T = await planTeachers(plan);
+  const n = v => Math.round((Number(v) || 0) * 10) / 10;
+  const done = planDone(c), total = PLAN_ITEMS.length;
+  const coreN = T.teachers.filter(t => (t.core || []).length).length, lectN = T.teachers.filter(t => Number(t.lect) > 0).length;
+  const devOk = T.teachers.filter(t => t.status_code === 'valid' || t.status_code === 'eligible' || t.ok === 'true').length;
+  const leaders = [['leader', '計畫主持人'], ['teach_lead', '教學負責人']].map(([k, label]) => {
+    const emp = (c[k] || '').trim(); const t = emp && T.all.find(x => x.emp_id.toLowerCase() === emp.toLowerCase());
+    return `<label>${label}（員工編號）<input data-f="${k}" value="${esc(emp)}" ${editable ? '' : 'disabled'} placeholder="例如 N4181">
+      ${emp ? `<small>${t ? `${esc(t.staff?.name || '')}｜${esc(t.dept)}｜${t.ve ? `臨床教師認證有效至 ${esc(t.ve)}` : esc(t.status_code === 'valid' ? '本年度達標' : '目前無有效認證')}` : '不在本計畫範圍內或查無此人'}</small>` : ''}</label>`;
+  }).join('');
+  const teacherPanel = `<div class="plan-auto"><div class="group-label">系統帶入：本計畫範圍的教師現況（教師認證、教師發展）</div>
+    <div class="score-dist">
+      <div class="sd valid"><b class="num">${T.teachers.length}</b><span>臨床教師（有效認證）</span><small>範圍內共 ${T.all.length} 人</small></div>
+      <div class="sd eligible"><b class="num">${T.teachers.length ? Math.round(devOk / T.teachers.length * 100) : 0}%</b><span>教師發展達標</span><small>${devOk} 人符合本年度規定</small></div>
+      <div class="sd bonus"><b class="num">${coreN}</b><span>核心教師</span><small>有核心教師認證課程</small></div>
+      <div class="sd"><b class="num">${lectN}</b><span>師培講師</span><small>擔任教學能力提升講師</small></div>
+    </div>
+    <details class="plan-tlist"><summary>教師名單（${T.teachers.length} 人）：姓名、單位、職稱、認證效期、教學能力提升、核心教師、師培講師</summary>
+      <div class="table-wrap"><table><thead><tr><th>姓名</th><th>員工編號</th><th>單位</th><th>職稱</th><th>認證效期至</th><th>教學能力提升</th><th>核心教師</th><th>師培講師</th></tr></thead><tbody>
+      ${T.teachers.slice(0, 500).map(t => `<tr><td>${esc(t.staff?.name || '')}</td><td><button class="btn-link" type="button" onclick="go('person','${esc(t.emp_id)}')">${esc(t.emp_id)}</button></td><td>${esc(t.dept)}</td><td>${esc(t.staff?.title || '')}</td>
+        <td>${esc(t.ve || (t.track_type === 'physician' ? '本年度達標' : ''))}</td><td class="num">${n(t.teach)}</td><td>${(t.core || []).length ? [...new Set(t.core.map(x => x.item))].map(esc).join('、') : ''}</td><td class="num">${Number(t.lect) > 0 ? n(t.lect) + ' 小時' : ''}</td></tr>`).join('')}
+      </tbody></table></div>${T.teachers.length > 500 ? '<p class="hint">僅顯示前 500 人，完整名單請按「下載教師名單」。</p>' : ''}
+      <button class="btn btn-ghost" type="button" id="planTeacherCsv">下載教師名單（CSV）</button></details></div>`;
+  const section = s => {
+    const sd = s.items.filter(i => c.items[i[0]] && c.items[i[0]].done).length;
+    return `<details class="plan-sec" ${s.k === '3' || sd < s.items.length ? 'open' : ''}><summary><b>${esc(s.t)}</b><span class="pill ${sd === s.items.length ? 'valid' : 'expiring'}">${sd} / ${s.items.length}</span></summary>
+      ${s.k === '1' ? `<div class="plan-leaders">${leaders}</div>` : ''}
+      ${s.teachers ? teacherPanel : ''}
+      ${s.items.map(([k, t, desc]) => { const v = c.items[k] || {}; return `<div class="plan-item ${v.done ? 'done' : ''}">
+        <label class="plan-check"><input type="checkbox" data-done="${k}" ${v.done ? 'checked' : ''} ${editable ? '' : 'disabled'}><b>${k.slice(1)}. ${esc(t)}</b></label>
+        <p class="hint">${esc(desc)}</p>
+        <textarea data-text="${k}" rows="3" ${editable ? '' : 'disabled'} placeholder="填寫本計畫的做法、文件或連結">${esc(v.text || '')}</textarea></div>`; }).join('')}
+    </details>`;
+  };
+  $('content').innerHTML = `
+    <section class="card plan-head">
+      ${isAdmin() ? '<button class="btn-link" type="button" onclick="state.planId=null;renderPlanPage()">← 計畫書列表</button>' : ''}
+      <h3><input id="planTitle" value="${esc(plan.title)}" ${editable ? '' : 'disabled'} style="font-size:18px;font-weight:800"></h3>
+      <div class="filters" style="align-items:center"><span class="pill ${PLAN_STATUS_PILL[plan.status] || ''}">${esc(plan.status)}</span>
+        <span>範圍：${esc(scopeName(plan.scope_key))}${(c.scope_units || []).length ? `（${c.scope_units.length} 個監測單位）` : ''}</span>
+        <span class="num">完成 <b>${done}</b> / ${total} 項</span></div>
+      <div class="cap-bar"><i style="width:${done / total * 100}%"></i></div>
+      ${plan.review_comment ? `<div class="attention">師培中心審查意見：${esc(plan.review_comment)}</div>` : ''}
+      <p class="hint">依醫策會「訓練計畫書模板」九大項目逐項填寫並勾選完成；「三、教學師資」的教師名單與教師發展由系統依本計畫範圍自動帶入。</p>
+      <div class="filters">
+        ${editable && !isAdmin() ? '<button class="btn btn-ghost" type="button" id="planSave">儲存草稿</button><button class="btn btn-primary" style="width:auto" type="button" id="planSubmit">送出審查</button>' : ''}
+        ${isAdmin() && !plan._new ? `<input id="planCm" placeholder="審查意見（選填）" style="flex:1"><button class="btn btn-primary" style="width:auto" type="button" onclick="reviewPlan(${Number(plan.id)},true)">通過</button><button class="btn btn-ghost" type="button" onclick="reviewPlan(${Number(plan.id)},false)">退回修改</button>` : ''}
+        <button class="btn btn-ghost" type="button" onclick="window.print()">列印／存成 PDF</button>
+      </div></section>
+    ${PLAN_TEMPLATE.map(section).join('')}`;
+  const collect = () => {
+    const items = {};
+    PLAN_ITEMS.forEach(k => { items[k] = { done: !!document.querySelector(`[data-done="${k}"]`)?.checked, text: document.querySelector(`[data-text="${k}"]`)?.value || '' }; });
+    const extra = {}; document.querySelectorAll('[data-f]').forEach(i => { extra[i.dataset.f] = i.value.trim(); });
+    return { title: $('planTitle').value, content: { ...c, ...extra, items } };
+  };
+  const save = submit => async () => {
+    if (submit && planDone(collect().content) < total && !confirm(`還有 ${total - planDone(collect().content)} 項未勾選完成，仍要送出審查嗎？`)) return;
+    const body = collect();
+    const d = await act('plan.save', { academic_year: plan.academic_year, title: body.title, content: body.content, submit });
+    if (d) { state.planId = null; renderPlanPage(); }
+  };
+  if ($('planSave')) $('planSave').onclick = save(false);
+  if ($('planSubmit')) $('planSubmit').onclick = save(true);
+  if ($('planTeacherCsv')) $('planTeacherCsv').onclick = () => download(`${plan.title}_教師名單.csv`, [['姓名', '員工編號', '單位', '職稱', '認證效期至', '教學能力提升', '核心教師', '師培講師時數'],
+    ...T.teachers.map(t => [t.staff?.name, t.emp_id, t.dept, t.staff?.title, t.ve || '', n(t.teach), [...new Set((t.core || []).map(x => x.item))].join('、'), n(t.lect)])]);
+}
+function reviewPlan(id, approve) { act('plan.review', { id, approve, comment: $('planCm') ? $('planCm').value : '' }, () => { state.planId = null; renderPlanPage(); }); }
+
+// 管理者：各科部／職類的計畫書總覽
+async function renderPlanList() {
+  const { data: plans } = await sb.from('training_plans').select('id,academic_year,scope_key,title,status,updated_at,submitted_at,content').order('academic_year', { ascending: false }).order('scope_key');
+  const list = plans || [];
+  $('content').innerHTML = `<section class="card"><h3>訓練計畫書（${list.length} 份）</h3>
+    <p class="hint">各科部管理人依醫策會「訓練計畫書模板」九大項目填寫；送審後在這裡審查。完成度＝已勾選完成的查檢項目數。</p>
+    <div class="table-wrap"><table><thead><tr><th>學年度</th><th>範圍</th><th>計畫書</th><th>完成度</th><th>狀態</th><th>最後更新</th></tr></thead><tbody>
+    ${list.map(p => `<tr><td class="num">${p.academic_year}</td><td>${esc(scopeName(p.scope_key))}</td>
+      <td><button class="btn-link" type="button" onclick="state.planId=${Number(p.id)};renderPlanPage()">${esc(p.title)}</button></td>
+      <td style="min-width:120px"><div class="cap-bar"><i style="width:${planDone(p.content) / PLAN_ITEMS.length * 100}%"></i></div><small>${planDone(p.content)} / ${PLAN_ITEMS.length}</small></td>
+      <td><span class="pill ${PLAN_STATUS_PILL[p.status] || ''}">${esc(p.status)}</span></td><td>${esc(fmtTime(p.updated_at))}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">尚無計畫書</td></tr>'}
+    </tbody></table></div></section>`;
+}
+
 // ---------- 名單 ----------
 const ORDER = { expiring: 0, suspended: 1, remedy: 1, eligible: 2, expired: 3, deficient: 4, valid: 5 };
 function distRows(list, keyOf = profGroup) {
@@ -990,7 +1193,7 @@ async function renderList() {
       <button type="button" class="kpi" style="--tone:var(--warning)" onclick="pickStatus('expiring')"><b class="num">${count('expiring') + count('remedy') + count('suspended')}</b><span>即將到期、資格暫停或點數尚缺 ›</span></button>
     </section>
     <section class="card"><h3>各職類認證分佈</h3>${LEGEND}${distRows(list)}</section>`;
-  $('content').innerHTML = kpis + `
+  $('content').innerHTML = scopeCard() + kpis + `
     <section class="card"><h3>人員名單</h3>
       <div class="filters">
         <input id="fQ" type="search" placeholder="員工編號或單位">
@@ -1533,7 +1736,7 @@ async function renderRoster() {
 
 // ---------- 管理（最高管理者） ----------
 async function renderAdmin() {
-  const { data: accounts, error } = await sb.from('profiles').select('emp_id,role,scope_dept,disabled,created_at').order('created_at', { ascending: false }).limit(500);
+  const { data: accounts, error } = await sb.from('profiles').select('*').order('created_at', { ascending: false }).limit(500);
   if (error) throw error;
   const rg = regimeOf(state.rules);
   const year = Number(today().slice(0, 4)) - 1911;
@@ -1559,13 +1762,15 @@ async function renderAdmin() {
         <label>員工編號<input id="gEmp" required></label>
         <label>角色<select id="gRole"><option value="general">一般人員</option><option value="dept_coordinator">科部主管</option><option value="admin">師培中心管理者</option><option value="super_admin">最高管理者</option></select></label>
         <label>科部主管的授權範圍（單位名稱開頭；留空＝本人所屬單位）<input id="gScope"></label>
+        <label>或：職類別管理人（依執登職類；選了就不看單位名稱，由本人勾選監測單位）<select id="gProf"><option value="">（不使用）</option>
+          ${['護理', '藥師', '檢驗', '放射師(放射診斷、放射腫瘤、核子醫學)', '物理治療', '職能治療', '呼吸治療', '營養', '臨床心理', '語言治療', '聽力', '助產', '醫師'].map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join('')}</select></label>
         <label class="check"><input id="gOff" type="checkbox"> 停用此帳號</label>
         <button class="btn btn-primary" style="width:auto" type="submit">套用</button>
       </form></section>
 
     <section class="card"><h3>已開通帳號（${accounts.length}）</h3><div class="table-wrap"><table>
       <thead><tr><th>員工編號</th><th>角色</th><th>授權範圍</th><th>狀態</th><th>開通時間</th></tr></thead><tbody>
-      ${accounts.map(a => `<tr><td>${esc(a.emp_id)}</td><td>${esc(ROLE_LABEL[a.role])}</td><td>${esc(a.scope_dept || '—')}</td><td>${a.disabled ? '<span class="pill expired">停用</span>' : '<span class="pill valid">使用中</span>'}</td><td>${esc(fmtTime(a.created_at))}</td></tr>`).join('')}
+      ${accounts.map(a => `<tr><td>${empLabel(a.emp_id)}</td><td>${esc(ROLE_LABEL[a.role])}</td><td>${esc(a.scope_profession ? `${a.scope_profession}職類${(a.scope_units || []).length ? `（${a.scope_units.length} 個單位）` : ''}` : (a.scope_dept || '—'))}</td><td>${a.disabled ? '<span class="pill expired">停用</span>' : '<span class="pill valid">使用中</span>'}</td><td>${esc(fmtTime(a.created_at))}</td></tr>`).join('')}
       </tbody></table></div></section>`;
 
   $('codeForm').onsubmit = async e => {
@@ -1581,7 +1786,7 @@ async function renderAdmin() {
   };
   $('roleForm').onsubmit = e => {
     e.preventDefault();
-    act('admin.setRole', { emp_id: $('gEmp').value, role: $('gRole').value, scope_dept: $('gScope').value.trim(), disabled: $('gOff').checked }, renderAdmin);
+    act('admin.setRole', { emp_id: $('gEmp').value, role: $('gRole').value, scope_dept: $('gScope').value.trim(), scope_profession: $('gProf').value, disabled: $('gOff').checked }, renderAdmin);
   };
 }
 async function setRegime(mode) {
