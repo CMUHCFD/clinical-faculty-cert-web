@@ -1115,6 +1115,17 @@ async function pickRoster() {
   toast(`已讀取名冊 ${state.roster.size} 人（只在這個瀏覽器分頁內使用，不會上傳；關閉分頁即清除）`);
   return state.roster;
 }
+// 民國日期（115/10/1）⇄ 西元日期（2026-10-01）
+const rocToAd = s => { const p = String(s || '').split('/'); return p.length === 3 ? `${Number(p[0]) + 1911}-${p[1].padStart(2, '0')}-${p[2].padStart(2, '0')}` : ''; };
+const adToRoc = s => `${Number(s.slice(0, 4)) - 1911}/${Number(s.slice(5, 7))}/${Number(s.slice(8, 10))}`;
+
+// 衛福部範本第二個工作表「學公會」代碼表
+const ASSOC = [['C000001', '中華民國醫事放射師公會全國聯合會'], ['C000002', '中華民國醫事放射學會'], ['C000003', '中華民國醫事檢驗公會全國聯合會'], ['C000004', '台灣助產學會'],
+  ['C000005', '社團法人台灣呼吸治療學會'], ['C000006', '社團法人中華民國物理治療師公會全國聯合會'], ['C000007', '社團法人台灣醫事檢驗學會'], ['C000008', '社團法人臺灣臨床藥學會'],
+  ['C000009', '社團法人臺灣職能治療學會'], ['C000010', '社團法人臺灣物理治療學會'], ['C000011', '臺灣臨床心理學會'], ['C000012', '中華民國臨床心理師公會全國聯合會'],
+  ['C000013', '中華民國藥師公會全國聯合會'], ['C000014', '台灣護理學會'], ['C000015', '中華民國牙體技術學會'], ['C000016', '中華民國諮商心理師公會全國聯合會'],
+  ['C000017', '中華民國營養師公會全國聯合會'], ['C000018', '台灣聽力語言學會']];
+
 async function downloadPec(rows, ref, label, kindOf) {
   try {
     const roster = await pickRoster();
@@ -1123,13 +1134,18 @@ async function downloadPec(rows, ref, label, kindOf) {
     rows.forEach(r => {
       const who = roster.get(r.emp_id.toLowerCase()), p = r.period || certPeriod(r, ref), prof = PEC_NAME[r.staff?.profession] || r.staff?.profession;
       if (!who || !/^[A-Z][0-9A-Z]\d{8}$/.test(who.id)) return missing.push(r.emp_id);
-      upload.push({ '姓名': who.name, '身分證字號': who.id, '職類': prof, '教師認證效期起日': p.start, '教師認證效期迄日': p.end, '取得認證機構代碼': general.pec_org_code || '157', '取得認證機構名稱': general.pec_org_name || '中國醫藥大學附設醫院' });
+      // 「取得認證機構代碼」是醫事機構代碼 1317050017A（醫策會資料中的 157 是平台內部代碼，不可用）
+      const code = general.pec_org_code && general.pec_org_code !== '157' ? general.pec_org_code : '1317050017A';
+      upload.push({ '姓名': who.name, '身分證字號': who.id, '職類': prof, '教師認證效期起日': p.start, '教師認證效期迄日': p.end, '取得認證機構代碼': code, '取得認證機構名稱': general.pec_org_name || '中國醫藥大學附設醫院' });
       review.push({ '員工編號': r.emp_id, '姓名': who.name, '單位': r.dept, '職稱': r.staff?.title || '', '職類': prof, '申請別': kindOf(r), '教學能力提升點數': r.teach, '應達點數': r.need, '原效期迄日': r.valid_end || '', '提報效期起日': p.start, '提報效期迄日': p.end });
     });
     if (!upload.length) throw new Error('名冊中找不到這些人員的資料');
     const stamp = today().replace(/-/g, '');
-    const a = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(a, XLSX.utils.json_to_sheet(upload), '工作表1');
-    XLSX.writeFile(a, `PEC上傳檔_${label}_${stamp}.xls`, { bookType: 'biff8' });
+    // 與衛福部「師資認證_認證教師」範本相同：工作表1（7 欄，全部文字）＋「學公會」代碼表，存成 .xls
+    const a = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(a, XLSX.utils.json_to_sheet(upload, { header: ['姓名', '身分證字號', '職類', '教師認證效期起日', '教師認證效期迄日', '取得認證機構代碼', '取得認證機構名稱'] }), '工作表1');
+    XLSX.utils.book_append_sheet(a, XLSX.utils.aoa_to_sheet([['代碼', '名稱'], ...ASSOC]), '學公會');
+    XLSX.writeFile(a, `師資認證_認證教師_${stamp}.xls`, { bookType: 'biff8' });
     const b = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(b, XLSX.utils.json_to_sheet(review), '核對清冊');
     XLSX.writeFile(b, `PEC核對清冊_${label}_${stamp}.xlsx`);
     toast(`已下載上傳檔與核對清冊，共 ${upload.length} 人${missing.length ? `；另有 ${missing.length} 人不在名冊或證號格式不符，未納入（${missing.slice(0, 5).join('、')}${missing.length > 5 ? '…' : ''}）` : ''}`, !missing.length);
@@ -1191,17 +1207,29 @@ async function renderExpiry() {
         <span class="num">共 <b>${batchRows.length}</b> 人：當月屆滿可展延 <b>${bc('展延')}</b>・保留期內已補足 <b>${bc('展延（保留期內補足）')}</b>・新增 <b>${bc('新增')}</b></span>
       </div>
       ${batchSkipped.length ? `<div class="attention">已排除醫策會不受理 ${batchSkipped.length} 人：${batchSkipped.map(r => `${esc(r.emp_id)}（${esc(pecEx(r.emp_id).reason)}）`).join('、')}</div>` : ''}
-      ${batchPeriod ? `<div class="note">提報效期：${batchPeriod.start}–${batchPeriod.end}（次月 1 日起整兩年）。已認證教師須在效期屆滿前 2 年內滿 8 點；新增須在 2 年內滿 10 點且年資達標。</div>` : ''}
+      ${batchPeriod ? `<div class="filters" style="align-items:center">
+        <span style="font-weight:700">認證效期</span>
+        <label style="margin:0">起日 <input id="bStart" type="date" value="${esc(rocToAd(batchPeriod.start))}" style="display:inline-block;width:auto"></label>
+        <label style="margin:0">迄日 <input id="bEnd" type="date" value="${esc(rocToAd(batchPeriod.end))}" style="display:inline-block;width:auto"></label>
+        <small class="hint" style="margin:0">預設為次月 1 日起整兩年，可直接修改；修改後下載的名單一律用這組效期。</small></div>
+        <div class="note">已認證教師須在效期屆滿前 2 年內滿 8 點；新增須在 2 年內滿 10 點且年資達標。</div>` : ''}
       <div class="filters">
-        <button class="btn btn-primary" style="width:auto" type="button" id="bPec" ${batchRows.length ? '' : 'disabled'}>下載醫策會上傳檔與核對清冊</button>
+        <button class="btn btn-primary" style="width:auto" type="button" id="bPec" ${batchRows.length ? '' : 'disabled'}>下載衛福部認證申請名單（Excel）</button>
         <button class="btn btn-ghost" type="button" id="bCsv" ${batchRows.length ? '' : 'disabled'}>下載名單（僅員工編號）</button>
       </div>
-      <div class="note">上傳檔需要姓名與身分證字號：按下後請選擇您電腦上的員工名冊（user….xlsx）。名冊只在這個瀏覽器分頁內讀取，不會上傳到任何地方。</div>
+      <div class="note">下載的「師資認證_認證教師_日期.xls」與衛福部範本相同：姓名、身分證字號、職類、教師認證效期起日、教師認證效期迄日、取得認證機構代碼（1317050017A）、取得認證機構名稱，並附「學公會」代碼表；另附一份核對清冊。
+        姓名與身分證字號取自您電腦上的員工名冊（按下後選擇 user….xlsx），只在這個瀏覽器分頁內讀取，不會上傳。</div>
     </section>`;
   const wireBatch = () => {
     if (!batchOn) return;
     $('bMonth').onchange = e => { state.batchMonth = e.target.value; renderExpiry(); };
-    $('bPec').onclick = () => downloadPec(state.batch.rows, state.batch.ref, state.batch.label, state.batch.kindOf);
+    $('bPec').onclick = () => {
+      // 承辦人可修改整批的認證效期；有填就一律採用
+      const s = $('bStart') && $('bStart').value, e = $('bEnd') && $('bEnd').value;
+      if (s && e && e < s) return toast('迄日不可早於起日', false);
+      const period = s && e ? { start: adToRoc(s), end: adToRoc(e) } : null;
+      downloadPec(period ? state.batch.rows.map(r => ({ ...r, period })) : state.batch.rows, state.batch.ref, state.batch.label, state.batch.kindOf);
+    };
     $('bCsv').onclick = () => download(`${state.batch.label}_名單_${today().replace(/-/g, '')}.csv`, [['員工編號', '單位', '職稱', '職類', '申請別', '教學點數', '應達點數', '原效期迄日', '提報效期起日', '提報效期迄日'],
       ...state.batch.rows.map(r => { const p = certPeriod(r, state.batch.ref); return [r.emp_id, r.dept, r.staff?.title, profGroup(r), kindOf(r), r.teach, r.need, r.valid_end, p.start, p.end]; })]);
   };
@@ -1251,7 +1279,7 @@ async function renderExpiry() {
       ${other ? `<div class="attention">其中 <b>${dropCount}</b> 人在舊制已達標、改採新制後尚未符合，已排在最前面。</div>` : ''}
       <div class="filters">
         ${canPick.length ? `<button class="btn btn-ghost" type="button" id="pickAll">全選可提報（${canPick.length}）</button>
-          ${exportable ? '<button class="btn btn-primary" style="width:auto" type="button" id="pecBtn">下載勾選者的醫策會上傳檔</button>'
+          ${exportable ? '<button class="btn btn-primary" style="width:auto" type="button" id="pecBtn">下載勾選者的衛福部認證申請名單（Excel）</button>'
             : '<button class="btn btn-primary" style="width:auto" type="button" id="sendBtn">送師培中心審查（勾選者）</button>'}` : ''}
         <button class="btn btn-ghost" type="button" id="listBtn">匯出此名單</button>
         ${nameBtn()}
@@ -1406,6 +1434,21 @@ async function showQr(id) {
 async function renderReview() {
   const { data: apps, error } = await sb.from('applications').select('*, staff!applications_emp_id_fkey(dept,title,profession)').order('submitted_at', { ascending: false }).limit(200);
   if (error) throw error;
+  // 待審申請的預設認證效期（與系統規則相同：舊制次月 1 日起整兩年；展延自原效期屆滿之次月起）；承辦人可修改
+  const pendEmps = [...new Set(apps.filter(a => a.status === '審核中' && a.app_type !== '他院轉任採認').map(a => a.emp_id))];
+  const veOf = {};
+  if (pendEmps.length) {
+    const { data: st } = await sb.from('cert_status').select(`emp_id,ve:${D()}->activeCertificate->>valid_end`).in('emp_id', pendEmps);
+    (st || []).forEach(s => { veOf[s.emp_id] = s.ve; });
+  }
+  const defPeriod = a => { const p = certPeriod({ ve: veOf[a.emp_id] || null }, today()); return { start: rocToAd(p.start), end: rocToAd(p.end) }; };
+  const periodInputs = a => {
+    if (a.app_type === '他院轉任採認') return `<small>核准後採認原效期：</small><br>
+      <input id="vs-${esc(a.id)}" type="date" value="${esc(a.ext_valid_start || '')}" style="width:150px"> ～<br><input id="ve-${esc(a.id)}" type="date" value="${esc(a.ext_valid_end || '')}" style="width:150px"><br>`;
+    const p = defPeriod(a);
+    return `<small>認證效期（可修改）：</small><br>
+      <input id="vs-${esc(a.id)}" type="date" value="${esc(p.start)}" style="width:150px"> ～<br><input id="ve-${esc(a.id)}" type="date" value="${esc(p.end)}" style="width:150px"><br>`;
+  };
   const row = a => `<tr>
     <td><button class="btn-link" type="button" onclick="go('person','${esc(a.emp_id)}')">${empLabel(a.emp_id)}</button><br><small>${esc(a.staff?.dept || '')}</small></td>
     <td>${esc(a.app_type)}<br><small>${esc(fmtTime(a.submitted_at))}${a.submitted_by && a.submitted_by !== a.emp_id ? `<br>由 ${esc(a.submitted_by)} 提報` : ''}</small></td>
@@ -1416,12 +1459,13 @@ async function renderReview() {
       : `<span class="pill ${a.auto_check?.eligible ? 'valid' : 'expired'}">系統檢核${a.auto_check?.eligible ? '符合' : '未符合'}</span>
       ${esc(a.auto_check?.reason || '')}<br>教學 ${esc(a.auto_check?.teaching)}・基礎 ${esc(a.auto_check?.basic)}・進階 ${esc(a.auto_check?.advanced)}（${esc(a.auto_check?.window || '')}）
       ${a.external_hours ? `<br>院外時數：${esc(a.external_hours)}` : ''}`}${a.memo ? `<br>備註：${esc(a.memo)}` : ''}</td>
-    <td>${a.status === '審核中' ? `<input id="cm-${esc(a.id)}" placeholder="審查意見（選填）" style="width:150px"><br>
+    <td>${a.status === '審核中' ? `${periodInputs(a)}<input id="cm-${esc(a.id)}" placeholder="審查意見（選填）" style="width:150px"><br>
         <button class="btn btn-primary" style="width:auto;padding:6px 12px" type="button" onclick="review('${esc(a.id)}',true)">核准</button>
         <button class="btn btn-ghost" type="button" onclick="review('${esc(a.id)}',false)">退回</button>`
       : `<span class="pill ${a.status === '已通過' ? 'valid' : 'expired'}">${esc(a.status)}</span><br><small>${a.valid_start ? `${esc(a.valid_start)}～${esc(a.valid_end)}` : esc(a.review_comment || '')}</small>`}</td></tr>`;
   // 已核准、待上傳醫策會：依核准月份整理，一鍵產生上傳檔（效期用核准時寫入的效期）
-  const approved = apps.filter(a => a.status === '已通過' && a.valid_start);
+  // 他院轉任採認的認證不是本院取得，不列入本院向衛福部申請的名單
+  const approved = apps.filter(a => a.status === '已通過' && a.valid_start && a.app_type !== '他院轉任採認');
   const months = [...new Set(approved.map(a => String(a.reviewed_at).slice(0, 7)))].sort().reverse();
   const am = state.approvedMonth && months.includes(state.approvedMonth) ? state.approvedMonth : months[0];
   const rocD = d => `${Number(d.slice(0, 4)) - 1911}/${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
@@ -1432,15 +1476,20 @@ async function renderReview() {
   const approvedCard = !months.length ? '' : `<section class="card batch"><h3>已核准、待上傳醫策會</h3>
     <div class="filters" style="align-items:center"><label style="margin:0;font-weight:700">核准月份 <select id="amSel" style="display:inline-block;width:auto;margin-left:6px">${months.map(m => `<option value="${m}" ${m === am ? 'selected' : ''}>${Number(m.slice(0, 4)) - 1911} 年 ${Number(m.slice(5, 7))} 月</option>`).join('')}</select></label>
       <span class="num">共 <b>${amRows.length}</b> 人</span>
-      <button class="btn btn-primary" style="width:auto" type="button" onclick="downloadPec(state.approvedRows, undefined, '核准名單', r => r.app_type)" ${amRows.length ? '' : 'disabled'}>下載醫策會上傳檔與核對清冊</button></div>
-    <div class="note">新制由科部主管提報、您審查核准；核准後在這裡整理成醫策會上傳檔。按下後請選擇您電腦上的員工名冊（只在瀏覽器內讀取，不會上傳）。</div></section>`;
+      <button class="btn btn-primary" style="width:auto" type="button" onclick="downloadPec(state.approvedRows, undefined, '核准名單', r => r.app_type)" ${amRows.length ? '' : 'disabled'}>下載衛福部認證申請名單（Excel）</button></div>
+    <div class="note">效期用您核准時填寫的效期。按下後請選擇您電腦上的員工名冊（只在瀏覽器內讀取，不會上傳）。他院轉任採認者不列入本名單。</div></section>`;
   $('content').innerHTML = approvedCard + `<section class="card"><h3>認證申請（${apps.filter(a => a.status === '審核中').length} 件待審）</h3>
     <div class="note">核准後系統會寫入認證效期並重新計算該員狀態；提報醫策會 PEC 平台仍需在您的電腦上產生提報檔（雲端沒有身分證字號）。</div>
     <div class="table-wrap"><table><thead><tr><th>員工編號</th><th>申請</th><th>系統檢核</th><th>審查</th></tr></thead><tbody>
     ${apps.map(row).join('') || '<tr><td colspan="4" class="empty">目前沒有申請</td></tr>'}</tbody></table></div></section>`;
   if ($('amSel')) $('amSel').onchange = e => { state.approvedMonth = e.target.value; renderReview(); };
 }
-function review(id, approve) { act('cert.review', { id, approve, comment: $(`cm-${id}`).value }, () => { state.list = null; renderReview(); }); }
+function review(id, approve) {
+  const s = $(`vs-${id}`) ? $(`vs-${id}`).value : '', e = $(`ve-${id}`) ? $(`ve-${id}`).value : '';
+  if (approve && (!s || !e)) return toast('請填寫認證效期起日與迄日', false);
+  if (approve && e < s) return toast('迄日不可早於起日', false);
+  act('cert.review', { id, approve, comment: $(`cm-${id}`).value, valid_start: s, valid_end: e }, () => { state.list = null; renderReview(); });
+}
 
 // ---------- 年度追蹤名單 ----------
 async function renderRoster() {
