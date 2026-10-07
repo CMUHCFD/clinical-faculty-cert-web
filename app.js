@@ -114,8 +114,19 @@ function lookupHTML(r) {
       <div class="lk-sub">${months < 0 ? '已屆滿' : months <= 6 ? `<b class="warn">剩 ${months} 個月到期</b>` : `還有 ${months} 個月`}</div>`;
   } else if (certTrack) {
     validity = `<div class="lk-big muted">尚未取得</div><div class="lk-sub">${d.lastCertificate ? `上一張效期至 ${esc(d.lastCertificate.valid_end_roc || d.lastCertificate.valid_end)}` : '目前沒有有效的臨床教師認證'}</div>`;
+  }
+  // 醫師沒有認證效期：主治醫師改顯示年度考核（CFD 構面），住院／研究醫師顯示是否為本年度臨床教師
+  let firstTile;
+  if (certTrack) firstTile = `<h3>認證效期</h3>${validity}`;
+  else if (d.appraisal) {
+    const a = d.appraisal;
+    firstTile = `<h3>${a.roc} 年度考核｜CFD 構面</h3><div class="lk-big ${a.base >= 10 ? 'ok' : a.base < 0 ? 'warn' : ''}">${n(a.score)}<span class="lk-of"> 分</span></div>
+      <div class="lk-sub">基本分 ${a.base > 0 ? '+' : ''}${a.base}・核心教師加分 +${n(a.bonus)}（滿分 ${a.maxScore}）</div>`;
+  } else if (d.trackType === 'physician') {
+    firstTile = `<h3>${Number(String(d.asOf || today()).slice(0, 4)) - 1911} 年度臨床教師</h3><div class="lk-big ${d.compliant ? 'ok' : 'warn'}">${d.compliant ? '是' : '尚未'}</div>
+      <div class="lk-sub">${d.compliant ? '本年度時數已達標' : '完成本年度時數即具臨床教師資格'}</div>`;
   } else {
-    validity = `<div class="lk-big muted">不適用</div><div class="lk-sub">${esc(d.trackLabel || '適用每年師培時數規範')}</div>`;
+    firstTile = `<h3>適用規範</h3><div class="lk-big muted">不列管</div><div class="lk-sub">${esc(d.trackLabel || '')}</div>`;
   }
   const have = certTrack ? d.teachingHours : d.totalHours, need = d.requiredTotalHours;
   const pct = need ? Math.min(100, (Number(have) || 0) / need * 100) : 100;
@@ -143,7 +154,7 @@ function lookupHTML(r) {
       ${certTrack ? `<span class="tag ${d.regime === 'legacy' ? 'legacy' : ''}">適用：${esc(d.regimeLabel || '')}</span>` : ''}
     </section>
     <section class="lk-tiles">
-      <div class="card lk-tile"><h3>認證效期</h3>${validity}</div>
+      <div class="card lk-tile">${firstTile}</div>
       <div class="card lk-tile"><h3>目前點數</h3>${pointsTile}</div>
       <div class="card lk-tile"><h3>${eligible || pending || !gaps.length ? '結果' : '還差'}</h3>${gapTile}</div>
     </section>`;
@@ -201,7 +212,13 @@ function lookupHTML(r) {
 
   const dn = r.regime === 'new' ? d : r.row.detail_new;
   const grid = certTrack ? newGrid(dn, { big: true, title: r.regime === 'new' ? '新制認證進度' : `${(d.newRulePreview && d.newRulePreview.appliesFrom) || 116} 年起改採新制：進度試算` }) : '';
-  return `<div class="lk">${hero}${reqCard(d, { big: true })}${appraisalCard(d, { big: true })}${grid}${next}${facultyCard(d, { big: true })}${detail}${grid ? '' : preview}${apps}</div>`;
+  return `<div class="lk">${hero}${roleBar(d)}
+    ${block('teacher', d.trackType === 'exempt' ? '' : reqCard(d, { big: true }) + grid + next + (grid ? '' : preview))}
+    ${block('cfd', appraisalCard(d, { big: true }))}
+    ${block('core', coreCard(d))}
+    ${block('faculty', facultyCard(d, { big: true }), '新聘／升等')}
+    ${block('lecturer', lecturerCard(d), '擔任教學能力提升課程講師')}
+    ${block('records', detail + apps)}</div>`;
 }
 function endLookup() {
   clearTimeout(state.lkTimer);
@@ -528,6 +545,58 @@ function newGrid(dn, o = {}) {
     ${susp}<div class="grid4">${iniHead}${renHead}${iniBasic}${renBasic}${iniAdv}${renAdv}</div>${uncls}</section>`;
 }
 
+// ---------- 個人頁的資訊區塊：臨床教師／主治醫師年度考核（CFD 構面）／核心教師／教職／師培講師／修課紀錄（顏色區分） ----------
+const BLK = {
+  teacher: '臨床教師', cfd: '主治醫師年度考核｜CFD 構面', core: '核心教師', faculty: '教職', lecturer: '師培講師', records: '修課紀錄'
+};
+const block = (kind, inner, sub) => !inner ? '' : `<section class="blk blk-${kind}" id="blk-${kind}">
+  <div class="blk-h"><span class="blk-dot" aria-hidden="true"></span><b>${BLK[kind]}</b>${sub ? `<small>${sub}</small>` : ''}</div>
+  <div class="blk-b">${inner}</div></section>`;
+
+// 頁首的角色摘要列：每個區塊一個色塊，點一下捲到該區塊
+function roleBar(d) {
+  const n = v => Math.round((Number(v) || 0) * 10) / 10;
+  const chips = [];
+  const short = String(d.status || '').replace(/^[^\p{L}\p{N}]+/u, '');
+  if (d.trackType !== 'exempt') chips.push(['teacher', short]);
+  if (d.appraisal) chips.push(['cfd', `${n(d.appraisal.score)} 分`]);
+  const core = d.coreCourses || [];
+  chips.push(['core', core.length ? `${core.length} 門｜${n(core.reduce((a, c) => a + c.hours, 0))} 小時` : '尚無']);
+  if (d.facultyCheck) chips.push(['faculty', d.facultyCheck.met ? '符合申請條件' : '尚未符合']);
+  if (d.lecturer) chips.push(['lecturer', `${n(d.lecturer.totalHours)} 小時｜${d.lecturer.count} 個單元`]);
+  return `<nav class="role-bar" aria-label="資訊區塊">${chips.map(([k, v]) => `<button type="button" class="role-chip rc-${k}" onclick="document.getElementById('blk-${k}').scrollIntoView({behavior:'smooth'})">
+    <span>${BLK[k].split('｜')[0]}</span><b>${esc(v)}</b></button>`).join('')}</nav>`;
+}
+
+// 核心教師：師培中心核心教師認證課程（SDM、EPA、ACGME 臨床教練、精準醫學教育…）
+function coreCard(d) {
+  const list = d.coreCourses || [];
+  const n = v => Math.round((Number(v) || 0) * 10) / 10;
+  if (!list.length) return `<section class="card"><p class="hint" style="margin:0">尚無核心教師認證課程紀錄。師培中心授予的核心教師認證課程包括：SDM 醫病共享決策、EPA 可信賴專業活動、ACGME 臨床教練、精準醫學教育等。</p></section>`;
+  const byItem = {};
+  list.forEach(c => (c.item || '核心教師認證課程').split('、').forEach(i => { byItem[i] = n((byItem[i] || 0) + c.hours); }));
+  return `<section class="card"><div class="core-sum">${Object.entries(byItem).map(([i, h]) => `<span class="core-badge"><b>${esc(i)}</b>${h} 小時</span>`).join('')}</div>
+    <ul class="lk-list">${list.map(c => `<li><span class="lk-date">${esc(String(c.date).slice(0, 10).replace(/-/g, '/'))}</span><span class="lk-title">${esc(c.title)}<small>${esc(c.item)}</small></span><span class="lk-h">${n(c.hours)}</span></li>`).join('')}</ul></section>`;
+}
+
+// 師培講師：擔任教學能力提升課程講師的紀錄（依年度收合，點開看日期、課程名稱、單元、時數）
+function lecturerCard(d) {
+  const L = d.lecturer;
+  if (!L) return '';
+  const n = v => Math.round((Number(v) || 0) * 10) / 10;
+  const years = Object.keys(L.byYear || {}).sort().reverse();
+  return `<section class="card">
+    <div class="lect-sum"><div><b class="num">${n(L.totalHours)}</b><span>小時</span></div><div><b class="num">${L.count}</b><span>個課程單元</span></div><div><b class="num">${years.length}</b><span>個年度</span></div></div>
+    ${years.map((y, i) => {
+      const list = (L.courses || []).filter(c => c.date.startsWith(y));
+      return `<details class="lk-year" ${i === 0 ? 'open' : ''}><summary><span class="lk-yr">${Number(y) - 1911} 年</span>
+        <span class="lk-chips"><span class="lk-chip t">授課 <b>${n(L.byYear[y])}</b> 小時</span><span class="lk-chip">${list.length} 個單元</span></span></summary>
+        <ul class="lk-list">${list.map(c => `<li><span class="lk-date">${Number(c.date.slice(5, 7))}/${Number(c.date.slice(8, 10))}</span>
+          <span class="lk-title">${esc(c.title)}${c.unit && c.unit !== c.title ? `<small>${esc(c.unit)}</small>` : ''}${c.co > 1 ? `<small>共同授課（${c.co} 位講師）</small>` : ''}</span><span class="lk-h">${n(c.hours)}</span></li>`).join('')}</ul></details>`;
+    }).join('')}
+    <div class="note">資料來源：教學系統「教學能力提升」課程的講師欄位，依姓名比對本院名冊歸戶；同名者無法確定是誰，未列入。共同授課的單元，每位講師都列全部時數。</div></section>`;
+}
+
 // 主治醫師申請教職新聘／升等的時數檢核（申請前三年內教學能力提升、前一年度師培總點數）
 function facultyCard(d, o = {}) {
   const f = d.facultyCheck;
@@ -555,7 +624,7 @@ function appraisalCard(d, o = {}) {
     nextTip = `再完成 ${what}，基本分可達 ${score} 分。`;
   }
   return `<section class="card appr ${o.big ? 'big' : ''}">
-    <h3>${a.roc} 年度主治醫師考核分數</h3>
+    <h3>${a.roc} 年度考核分數（CFD 構面）</h3>
     <div class="appr-top">
       <div class="appr-score tone-${tone}"><b class="num">${n(a.score)}</b><span>分</span><small>滿分 ${a.maxScore}</small></div>
       <div class="appr-calc">
@@ -702,7 +771,14 @@ function personHTML(o) {
   // 醫事職類：以新制四宮格取代「新制試算」與「九大項目」兩張卡（舊制期間顯示為新制試算）
   const dn = o.regime === 'new' ? d : row.detail_new;
   const grid = certTrack ? newGrid(dn, { title: o.regime === 'new' ? '新制認證進度' : `${(d.newRulePreview && d.newRulePreview.appliesFrom) || 116} 年起改採新制：進度試算` }) : '';
-  return hero + meters + appraisalCard(d) + next + facultyCard(d) + (grid || preview) + years + (grid ? '' : items) + appList + recs;   // 結論 → 我的身分要完成什麼 → 下一步 → 細節
+  // 結論 → 角色摘要 → 各資訊區塊（臨床教師／CFD 考核／核心教師／教職／師培講師／修課紀錄）
+  return hero + roleBar(d)
+    + block('teacher', d.trackType === 'exempt' ? '' : meters + next + (grid || preview) + years + (grid ? '' : items))
+    + block('cfd', appraisalCard(d))
+    + block('core', coreCard(d))
+    + block('faculty', facultyCard(d), '新聘／升等')
+    + block('lecturer', lecturerCard(d), '擔任教學能力提升課程講師')
+    + block('records', appList + recs);   // 結論 → 我的身分要完成什麼 → 下一步 → 細節
 }
 
 // 認證規範頁：主治醫師年度考核分數的計分方式

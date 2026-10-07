@@ -86,6 +86,28 @@ form input { display: block; width: 100%; margin-top: 4px; padding: 10px 12px; b
 .req-list li.met .bar i { background: var(--success); }
 .req-list small { color: var(--muted); }
 .req-card.big .req-label { font-size: 16px; } .req-card.big .req-num { font-size: 19px; }
+/* 個人頁資訊區塊（顏色區分）：臨床教師／CFD 考核／核心教師／教職／師培講師／修課紀錄 */
+:root { --blk-teacher: #2575A1; --blk-cfd: #13A3B8; --blk-core: #7A5CC0; --blk-faculty: #C7891A; --blk-lecturer: #4C9A3F; --blk-records: #768394; }
+.blk { --c: var(--blk-teacher); display: grid; gap: 12px; border-left: 6px solid var(--c); border-radius: 12px; padding: 0 0 4px 12px; min-width: 0; }
+.blk-teacher { --c: var(--blk-teacher); --t: #EBF4F9; } .blk-cfd { --c: var(--blk-cfd); --t: #E7F7FA; } .blk-core { --c: var(--blk-core); --t: #F2EEFB; }
+.blk-faculty { --c: var(--blk-faculty); --t: #FFF6E3; } .blk-lecturer { --c: var(--blk-lecturer); --t: #EEF7EC; } .blk-records { --c: var(--blk-records); --t: #F1F3F5; }
+.blk-h { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; background: var(--t); border-radius: 10px; padding: 10px 14px; }
+.blk-h b { font-size: 18px; color: var(--c); filter: brightness(.8); }
+.blk-h small { color: var(--muted); font-size: 13px; }
+.blk-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--c); flex: 0 0 auto; align-self: center; }
+.blk-b { display: grid; gap: 12px; min-width: 0; }
+.role-bar { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.role-chip { text-align: left; border: 0; border-radius: 10px; padding: 10px 12px; cursor: pointer; display: grid; gap: 2px; color: #fff; min-width: 0; }
+.role-chip span { font-size: 12.5px; opacity: .9; } .role-chip b { font-size: 15px; line-height: 1.3; overflow-wrap: anywhere; }
+.rc-teacher { background: var(--blk-teacher); } .rc-cfd { background: #0F8798; } .rc-core { background: var(--blk-core); }
+.rc-faculty { background: #A06C0E; } .rc-lecturer { background: #3F8233; }
+.role-chip:focus-visible { outline: 3px solid var(--warning); outline-offset: 2px; }
+.core-sum { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.core-badge { background: #F2EEFB; color: #4F3A8F; border-radius: 8px; padding: 4px 10px; font-size: 13px; display: inline-flex; gap: 8px; }
+.lect-sum { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 8px; }
+.lect-sum > div { background: #EEF7EC; border-radius: 10px; padding: 10px; display: grid; justify-items: center; }
+.lect-sum b { font-size: 26px; color: #3F8233; } .lect-sum span { font-size: 12.5px; color: var(--muted); }
+
 /* 新制：暫停資格、補滿次月恢復 */
 .tone-suspended { --tone: #E8833A; }
 .pill.suspended { background: #FFF1E6; color: #a14a0b; }
