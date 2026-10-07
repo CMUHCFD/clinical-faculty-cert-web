@@ -213,7 +213,9 @@ function lookupHTML(r) {
   const dn = r.regime === 'new' ? d : r.row.detail_new;
   const grid = certTrack ? newGrid(dn, { big: true, title: r.regime === 'new' ? '新制認證進度' : `${(d.newRulePreview && d.newRulePreview.appliesFrom) || 116} 年起改採新制：進度試算` }) : '';
   return `<div class="lk">${hero}${roleBar(d)}
-    ${block('teacher', d.trackType === 'exempt' ? '' : reqCard(d, { big: true }) + grid + next + (grid ? '' : preview))}
+    ${block('teacher', d.trackType === 'exempt' ? '' : reqCard(d, { big: true })
+      + (certTrack && !d.transferredFrom ? '<section class="card lk-note">由其他教學醫院轉任者：您的他院認證可以採認，視為展延教師。請登入後在「我的認證」上傳原認證證書申請查證。</section>' : '')
+      + grid + next + (grid ? '' : preview))}
     ${block('cfd', appraisalCard(d, { big: true }))}
     ${block('core', coreCard(d))}
     ${block('faculty', facultyCard(d, { big: true }), '新聘／升等')}
@@ -597,6 +599,48 @@ function lecturerCard(d) {
     <div class="note">資料來源：教學系統「教學能力提升」課程的講師欄位，依姓名比對本院名冊歸戶；同名者無法確定是誰，未列入。共同授課的單元，每位講師都列全部時數。</div></section>`;
 }
 
+// ---------- 他院轉任：上傳原醫院的臨床教師認證證書，師培中心查證後以展延教師列管 ----------
+// 證書存於不公開的儲存區（只有本人與管理者可存取），審查後自動刪除
+function transferCard(d, empId, apps, canUpload) {
+  if (!(d.trackType === 'initial' || d.trackType === 'renewal')) return '';
+  const pend = (apps || []).find(a => a.app_type === '他院轉任採認' && a.status === '審核中');
+  if (d.transferredFrom) return `<section class="card transfer-ok"><b>已採認他院認證</b>：${esc(d.transferredFrom)}。依規定視為展延教師${d.activeCertificate ? '，採認原效期' : ''}。</section>`;
+  if (pend) return `<section class="card"><b>他院轉任採認：審核中</b><br><small>${esc(pend.ext_org || '')}｜原效期 ${esc(pend.ext_valid_start || '')}～${esc(pend.ext_valid_end || '')}。師培中心查證證書後會更新您的認證狀態。</small></section>`;
+  if (!canUpload) return '';
+  return `<details class="card transfer"><summary><b>由其他教學醫院轉任？</b>上傳原認證證書，申請採認</summary>
+    <ul class="recs"><li>於其他教學醫院取得臨床教師認證後轉任本院者，<b>視為展延教師</b>。</li>
+      <li>原認證效期<b>仍有效</b>：查證後採認原效期，之後依展延規定辦理。</li>
+      <li>原認證效期<b>已屆滿</b>：查證後依展延的時數規定認證，不必依初次認證完成 10 點。</li></ul>
+    <form id="trfForm" class="inline-form">
+      <label>原認證醫院<input id="trfOrg" required placeholder="例如：○○醫院"></label>
+      <label>原證書字號（選填）<input id="trfNo"></label>
+      <label>原效期起日<input id="trfStart" type="date" required></label>
+      <label>原效期迄日<input id="trfEnd" type="date" required></label>
+      <label>原認證證書（PDF、JPG 或 PNG，10 MB 以內）<input id="trfFile" type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" required></label>
+      <label>備註（選填）<input id="trfMemo"></label>
+      <button class="btn btn-primary" type="submit" style="width:auto">上傳並送出查證</button>
+      <p class="hint">證書只有您本人與師培中心看得到，查證完成後系統會自動刪除檔案。</p>
+    </form></details>`;
+}
+async function submitTransfer(empId, after) {
+  const f = $('trfFile').files[0];
+  if (!f) return toast('請選擇證書檔案', false);
+  if (f.size > 10 * 1024 * 1024) return toast('檔案超過 10 MB', false);
+  const ext = (f.name.split('.').pop() || 'pdf').toLowerCase().replace(/[^a-z]/g, '');
+  const path = `${empId.toLowerCase()}/${Date.now()}.${ext}`;
+  const btn = $('trfForm').querySelector('button[type=submit]'); btn.disabled = true; btn.textContent = '上傳中…';
+  const up = await sb.storage.from('cert-uploads').upload(path, f, { contentType: f.type || undefined, upsert: false });
+  if (up.error) { btn.disabled = false; btn.textContent = '上傳並送出查證'; return toast('上傳失敗：' + up.error.message, false); }
+  const d = await act('cert.transferApply', { emp_id: empId, ext_org: $('trfOrg').value, ext_cert_no: $('trfNo').value, ext_valid_start: $('trfStart').value, ext_valid_end: $('trfEnd').value, attachment_path: path, memo: $('trfMemo').value }, after);
+  if (!d) { await sb.storage.from('cert-uploads').remove([path]); btn.disabled = false; btn.textContent = '上傳並送出查證'; }
+}
+// 管理者查看證書：產生 5 分鐘有效的臨時連結
+async function viewCert(path) {
+  const { data, error } = await sb.storage.from('cert-uploads').createSignedUrl(path, 300);
+  if (error) return toast('無法開啟證書：' + error.message, false);
+  window.open(data.signedUrl, '_blank', 'noopener');
+}
+
 // 主治醫師申請教職新聘／升等的時數檢核（申請前三年內教學能力提升、前一年度師培總點數）
 function facultyCard(d, o = {}) {
   const f = d.facultyCheck;
@@ -661,6 +705,7 @@ async function renderPerson(empId, back) {
     act('cert.apply', { emp_id: empId, service_years: $('apYears').value, external_hours: $('apExt').value, memo: $('apMemo').value },
       () => { state.list = null; renderPerson(empId, back); });
   };
+  if ($('trfForm')) $('trfForm').onsubmit = e => { e.preventDefault(); submitTransfer(empId, () => { state.list = null; renderPerson(empId, back); }); };
 }
 
 // 個人頁內容：登入後的「我的認證／人員頁」與免登入的「進度查詢」共用（o.lookup = 免登入、唯讀）
@@ -674,7 +719,7 @@ function personHTML(o) {
   const hero = `
     <section class="card hero tone-${esc(d.statusCode)}">
       ${back ? `<button class="btn-link" type="button" onclick="go('${state.backTo || 'dept'}')">← 返回</button><br>` : ''}
-      ${certTrack ? `<span class="tag ${d.regime === 'legacy' ? 'legacy' : ''}">目前適用：${esc(d.regimeLabel)}</span>` : ''}
+      ${certTrack ? `<span class="tag ${d.regime === 'legacy' ? 'legacy' : ''}">目前適用：${esc(d.regimeLabel)}</span>` : ''}${d.transferredFrom ? ` <span class="tag transfer-tag">他院轉任：${esc(d.transferredFrom)}</span>` : ''}
       <div class="status">${esc(d.status)}</div>
       <div class="rule">${esc(d.trackLabel)}</div>
       <div class="rule">員工編號 ${o.lookup ? `${esc(empId)} <span class="nm">${esc(o.name || '')}</span>` : empLabel(empId)}｜${esc(staff?.dept || '')}｜${esc(staff?.title || '')}｜${esc(staff?.profession || '')}${cert ? `｜認證效期 ${esc(cert.valid_start_roc)}–${esc(cert.valid_end_roc)}` : ''}</div>
@@ -773,7 +818,7 @@ function personHTML(o) {
   const grid = certTrack ? newGrid(dn, { title: o.regime === 'new' ? '新制認證進度' : `${(d.newRulePreview && d.newRulePreview.appliesFrom) || 116} 年起改採新制：進度試算` }) : '';
   // 結論 → 角色摘要 → 各資訊區塊（臨床教師／CFD 考核／核心教師／教職／師培講師／修課紀錄）
   return hero + roleBar(d)
-    + block('teacher', d.trackType === 'exempt' ? '' : meters + next + (grid || preview) + years + (grid ? '' : items))
+    + block('teacher', d.trackType === 'exempt' ? '' : meters + transferCard(d, empId, apps, (own || o.admin) && !o.lookup) + next + (grid || preview) + years + (grid ? '' : items))
     + block('cfd', appraisalCard(d))
     + block('core', coreCard(d))
     + block('faculty', facultyCard(d), '新聘／升等')
@@ -842,6 +887,12 @@ async function renderRules() {
           <dt>未完成</dt><dd>${esc(rc.suspension_rule || '某年度未完成者，次年 1/1 起暫停教師資格；補滿當月的次月 1 日恢復，效期不變。')}</dd>
           <dt>提報</dt><dd>由科部主管統一提報，師培中心審查</dd></dl></div>
     </div>
+    <h4 style="margin-top:14px">他院轉任教師</h4>
+    <ul class="recs">
+      <li>於其他教學醫院取得臨床教師認證後轉任本院者，<b>視為展延教師</b>，不必依初次認證規定重新完成 10 點。</li>
+      <li>原認證效期<b>仍有效</b>者：檢附原認證證書，經師培中心查證後<b>採認原效期</b>，之後依展延規定辦理。</li>
+      <li>原認證效期<b>已屆滿</b>者：檢附原認證證書，經查證後依展延的時數規定認證（舊制：申請前 2 年內 8 點；新制：當年度 4 點、其中進階 2 點）。</li>
+      <li>申請方式：登入後在「我的認證」上傳證書；證書僅本人與師培中心可查看，查證完成後自動刪除。</li></ul>
     <h4 style="margin-top:14px">新制：教學能力提升課程分類與認證時數標準</h4>
     <div class="table-wrap"><table class="rules-t std-t"><thead><tr><th>類別</th><th>課程項目</th><th>初次認證教師<br><small>二年十小時（或十點）</small></th><th>展延認證教師<br><small>每年四小時（或四點）</small></th></tr></thead><tbody>
       <tr><td><b>基礎課程</b></td><td>${BASIC.join('<br>')}</td><td><b class="must">必修</b>；至少（含）二項課程項目，共計至少四小時（或四點）</td><td>選修</td></tr>
@@ -1358,9 +1409,13 @@ async function renderReview() {
   const row = a => `<tr>
     <td><button class="btn-link" type="button" onclick="go('person','${esc(a.emp_id)}')">${empLabel(a.emp_id)}</button><br><small>${esc(a.staff?.dept || '')}</small></td>
     <td>${esc(a.app_type)}<br><small>${esc(fmtTime(a.submitted_at))}${a.submitted_by && a.submitted_by !== a.emp_id ? `<br>由 ${esc(a.submitted_by)} 提報` : ''}</small></td>
-    <td class="reason"><span class="pill ${a.auto_check?.eligible ? 'valid' : 'expired'}">系統檢核${a.auto_check?.eligible ? '符合' : '未符合'}</span>
+    <td class="reason">${a.app_type === '他院轉任採認'
+      ? `<span class="pill eligible">他院轉任・待查證</span><br>原認證醫院：<b>${esc(a.ext_org || '')}</b>${a.ext_cert_no ? `（證號 ${esc(a.ext_cert_no)}）` : ''}
+        <br>原效期：${esc(a.ext_valid_start || '')}～${esc(a.ext_valid_end || '')}${a.ext_valid_end && a.ext_valid_end >= today() ? ' <span class="pill valid">仍有效・採認原效期</span>' : ' <span class="pill expiring">已屆滿・視為展延</span>'}
+        ${a.attachment_path ? `<br><button class="btn btn-ghost" type="button" style="margin-top:6px" onclick="viewCert('${esc(a.attachment_path)}')">查看證書</button>` : a.status !== '審核中' ? '<br><small>證書檔已於審查後刪除</small>' : ''}`
+      : `<span class="pill ${a.auto_check?.eligible ? 'valid' : 'expired'}">系統檢核${a.auto_check?.eligible ? '符合' : '未符合'}</span>
       ${esc(a.auto_check?.reason || '')}<br>教學 ${esc(a.auto_check?.teaching)}・基礎 ${esc(a.auto_check?.basic)}・進階 ${esc(a.auto_check?.advanced)}（${esc(a.auto_check?.window || '')}）
-      ${a.external_hours ? `<br>院外時數：${esc(a.external_hours)}` : ''}${a.memo ? `<br>備註：${esc(a.memo)}` : ''}</td>
+      ${a.external_hours ? `<br>院外時數：${esc(a.external_hours)}` : ''}`}${a.memo ? `<br>備註：${esc(a.memo)}` : ''}</td>
     <td>${a.status === '審核中' ? `<input id="cm-${esc(a.id)}" placeholder="審查意見（選填）" style="width:150px"><br>
         <button class="btn btn-primary" style="width:auto;padding:6px 12px" type="button" onclick="review('${esc(a.id)}',true)">核准</button>
         <button class="btn btn-ghost" type="button" onclick="review('${esc(a.id)}',false)">退回</button>`
