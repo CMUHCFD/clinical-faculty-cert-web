@@ -776,7 +776,7 @@ async function renderRatio() {
     const cap = r.teachersValid * R, use = cap ? Math.min(100, r.trainees / cap * 100) : (r.trainees ? 100 : 0);
     return `<tr class="${r.ok ? '' : 'bad'}">
       <td><b>${esc(r.prof)}</b></td>
-      <td class="num">${r.teachers}${r.teachersInvalid ? ` <small class="warn">（${r.teachersInvalid} 位認證有問題）</small>` : ''}</td>
+      <td class="num">${r.teachers}${r.teachersInvalid ? ` <small class="warn">（${r.teachersInvalid} 位認證有問題）</small>` : ''}${r.teachersUnverified ? `<br><small class="muted" title="醫策會教師認證資料只列現職人員，已離職者無法回溯查證，仍計入教師">${r.teachersUnverified} 位已離職、無法查證</small>` : ''}</td>
       <td class="num">${r.trainees}</td>
       <td class="num"><b>${r.ratio == null ? '—' : `1 : ${r.ratio}`}</b></td>
       <td style="min-width:150px"><div class="cap-bar"><i style="width:${use}%" class="${r.ok ? '' : 'over'}"></i></div>
@@ -802,7 +802,7 @@ async function renderRatio() {
     <section class="card"><h3>${label(k)}各職類師生比</h3>
       <div class="table-wrap"><table><thead><tr><th>職類</th><th>名單教師</th><th>PGY 學員</th><th>師生比</th><th>帶教容量（有效教師 × ${R}）</th><th>1:${R}</th></tr></thead>
       <tbody>${M.rows.map(row).join('')}</tbody></table></div>
-      <div class="note">師生比以「有效認證教師」計算。資料來源：${esc(M.file)}；教師認證比對：${esc(M.pecFile || '')}。</div></section>
+      <div class="note">師生比以「有效認證教師」計算。醫策會教師認證資料只列現職人員，名單上已離職的教師無法回溯查證，仍計入教師、另行標示。資料來源：${esc(M.file)}；教師認證比對：${esc(M.pecFile || '')}。</div></section>
     ${trend}`;
   $('rMonth').onchange = e => { state.ratioMonth = e.target.value; renderRatio(); };
 }

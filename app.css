@@ -94,6 +94,7 @@ form input { display: block; width: 100%; margin-top: 4px; padding: 10px 12px; b
 .cap-bar i { display: block; height: 100%; background: var(--success); border-radius: 5px; } .cap-bar i.over { background: var(--danger); }
 tr.bad td { background: #FFF0F1; }
 small.warn { color: #b3261e; font-weight: 700; }
+small.muted { color: var(--muted); }
 .attention-card { border-left: 6px solid var(--warning); background: #FFFBE6; }
 
 /* 醫事職類新制四宮格（初次認證／展延 × 基礎／進階） */
