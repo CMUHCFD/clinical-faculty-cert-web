@@ -9,7 +9,7 @@ const emailOf = emp => `${emp.trim().toLowerCase()}@staff.invalid`;
 const state = { me: null, role: 'general', view: null, list: null, regime: 'legacy', rules: null, qrTimer: null };
 
 const ROLE_LABEL = { general: '一般人員', dept_coordinator: '科部主管', admin: '師培中心管理者', super_admin: '最高管理者' };
-const STATE_LABEL = { met: '已達標', in_progress: '進行中', missed: '未達標', future: '尚未開始', exempt: '不檢核', window: '採計期間' };
+const STATE_LABEL = { met: '已達標', in_progress: '進行中', missed: '未達標（暫停資格）', made_up: '已補足', future: '尚未開始', exempt: '不檢核', window: '採計期間' };
 const BASIC = ['課程設計', '教學技巧', '評估技巧', '教材製作'];
 const ADVANCED = ['跨領域團隊合作照護教學', '全人照護教學', '溝通及輔導', '創新教學導入', '教師教學經驗分享'];
 const isAdmin = () => state.role === 'admin' || state.role === 'super_admin';
@@ -507,10 +507,13 @@ function newGrid(dn, o = {}) {
   const renAdv = cell(!ini, '進階課程', true, '每年至少二小時（或二點）',
     `<div class="g-nums"><span>今年 <b class="num">${n(dn.advancedHours)} / ${needAdv}</b> 小時</span>${check(dn.advancedHours >= needAdv)}</div>${bar(dn.advancedHours, needAdv)}${chips(ADVANCED)}`);
 
-  const uncls = dn.unclassifiedHours > 0 ? `<div class="note">另有 ${n(dn.unclassifiedHours)} 小時教學能力提升課程尚未歸類到基礎或進階項目：會計入總時數，但不計入基礎／進階。如有疑問請洽師培中心。</div>` : '';
+  const s = dn.suspension;
+  const susp = s && s.active ? `<div class="g-susp"><b>${s.debtTotal > 0 || s.debtAdv > 0 ? '教師資格暫停中' : `已補滿，${esc(s.restoredOn)} 起恢復`}</b>
+      ${s.debtTotal > 0 || s.debtAdv > 0 ? `${esc(s.years.join('、'))} 年度未完成，自 ${esc(s.from)} 起暫停。請先補滿 ${n(Math.max(s.debtTotal, s.debtAdv))} 點${s.debtAdv > 0 ? `（其中進階 ${n(s.debtAdv)} 點）` : ''}，補滿當月的次月 1 日恢復；效期不變，補足用掉的時數不計入今年。` : '補足的時數已用於前一年度，下列為今年度進度。'}</div>` : '';
+  const uncls = dn.unclassifiedHours > 0 ?`<div class="note">另有 ${n(dn.unclassifiedHours)} 小時教學能力提升課程尚未歸類到基礎或進階項目：會計入總時數，但不計入基礎／進階。如有疑問請洽師培中心。</div>` : '';
   return `<section class="card grid4-card ${o.big ? 'big' : ''}"><h3>${esc(o.title || '新制認證進度')}</h3>
     <p class="hint">依「教學能力提升（基礎／進階）課程分類與認證時數標準」。${ini ? '您目前適用左欄「初次認證教師」。' : '您目前適用右欄「展延認證教師」。'}</p>
-    <div class="grid4">${iniHead}${renHead}${iniBasic}${renBasic}${iniAdv}${renAdv}</div>${uncls}</section>`;
+    ${susp}<div class="grid4">${iniHead}${renHead}${iniBasic}${renBasic}${iniAdv}${renAdv}</div>${uncls}</section>`;
 }
 
 // 主治醫師年度考核分數：上課時數 → 基本分（級距中標出目前所在級）＋核心教師認證課程加分
@@ -649,8 +652,8 @@ function personHTML(o) {
 
   const years = (d.yearly || []).length ? `
     <section class="card"><h3>逐年點數</h3><div class="years">
-      ${d.yearly.map(y => `<div class="year ${esc(y.state)}"><b>${y.roc} 年</b> <small>${STATE_LABEL[y.state] || ''}</small><br>
-        教學 <b class="num">${y.teach}</b>　基礎 <b class="num">${y.basic}</b>　進階 <b class="num">${y.adv}</b></div>`).join('')}
+      ${d.yearly.map(y => `<div class="year ${esc(y.state)}"><b>${y.roc} 年</b> <small>${STATE_LABEL[y.state] || ''}${y.madeUpOn ? `，${esc(y.madeUpOn.slice(0, 7).replace('-', '/'))} 起恢復` : ''}</small><br>
+        教學 <b class="num">${y.teach}</b>　基礎 <b class="num">${y.basic}</b>　進階 <b class="num">${y.adv}</b>${y.madeUpHours > 0 ? `<br><small>另 ${y.madeUpHours} 點用於補足前一年度</small>` : ''}</div>`).join('')}
     </div></section>` : '';
 
   const eq = d.itemsEquipped || {};
@@ -732,7 +735,7 @@ async function renderRules() {
         <dl><dt>初次認證</dt><dd>認證前 ${ini.timeframe_years || 2} 年內完成 ${ini.required_total_hours || 10} 點；基礎必修至少（含）${(ini.basic_courses || {}).min_items || 2} 項共 ${(ini.basic_courses || {}).required_total_hours || 4} 點，進階選修</dd>
           <dt>效期</dt><dd>${rc.validity_years || 4} 年（次年 1/1 起至第 ${rc.validity_years || 4} 年 12/31）</dd>
           <dt>展延</dt><dd>效期內每年 ${rc.annual_required_hours || 4} 點，其中進階必修至少 ${rc.annual_advanced_required_hours ?? 2} 點，基礎選修；不得跨年抵充</dd>
-          <dt>補救</dt><dd>${esc(rc.remedy_rule || '')}</dd>
+          <dt>未完成</dt><dd>${esc(rc.suspension_rule || '某年度未完成者，次年 1/1 起暫停教師資格；補滿當月的次月 1 日恢復，效期不變。')}</dd>
           <dt>提報</dt><dd>由科部主管統一提報，師培中心審查</dd></dl></div>
     </div>
     <h4 style="margin-top:14px">新制：教學能力提升課程分類與認證時數標準</h4>
@@ -805,7 +808,7 @@ async function renderRatio() {
 }
 
 // ---------- 名單 ----------
-const ORDER = { expiring: 0, remedy: 1, eligible: 2, expired: 3, deficient: 4, valid: 5 };
+const ORDER = { expiring: 0, suspended: 1, remedy: 1, eligible: 2, expired: 3, deficient: 4, valid: 5 };
 function distRows(list, keyOf = profGroup) {
   const by = {};
   list.forEach(r => {
@@ -829,7 +832,7 @@ async function renderList() {
       <button type="button" class="kpi" onclick="pickStatus('')"><b class="num">${list.length}</b><span>所屬人員</span></button>
       <button type="button" class="kpi" style="--tone:var(--success)" onclick="pickStatus('valid')"><b class="num">${count('valid')}</b><span>認證有效／年度達標</span></button>
       <button type="button" class="kpi" style="--tone:var(--secondary)" onclick="pickStatus('can')"><b class="num">${list.filter(r => r.can_apply).length}</b><span>可提報認證 ›</span></button>
-      <button type="button" class="kpi" style="--tone:var(--warning)" onclick="pickStatus('expiring')"><b class="num">${count('expiring') + count('remedy')}</b><span>即將到期、點數尚缺 ›</span></button>
+      <button type="button" class="kpi" style="--tone:var(--warning)" onclick="pickStatus('expiring')"><b class="num">${count('expiring') + count('remedy') + count('suspended')}</b><span>即將到期、資格暫停或點數尚缺 ›</span></button>
     </section>
     <section class="card"><h3>各職類認證分佈</h3>${LEGEND}${distRows(list)}</section>`;
   $('content').innerHTML = kpis + `
@@ -846,7 +849,7 @@ async function renderList() {
     const q = $('fQ').value.trim().toLowerCase(), s = $('fS').value;
     let rows = list.filter(r => !q || r.emp_id.toLowerCase().includes(q) || (r.dept || '').toLowerCase().includes(q));
     if (s === 'can') rows = rows.filter(r => r.can_apply);
-    else if (s === 'expiring') rows = rows.filter(r => ['expiring', 'remedy'].includes(r.status_code));
+    else if (s === 'expiring') rows = rows.filter(r => ['expiring', 'remedy', 'suspended'].includes(r.status_code));
     else if (s === 'valid') rows = rows.filter(r => r.status_code === 'valid');
     else if (s === 'deficient') rows = rows.filter(r => ['deficient', 'expired'].includes(r.status_code));
     else if (s === 'newgap') rows = rows.filter(r => r.new_ok === 'false');

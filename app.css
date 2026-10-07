@@ -82,6 +82,13 @@ form input { display: block; width: 100%; margin-top: 4px; padding: 10px 12px; b
 .req-list li.met .bar i { background: var(--success); }
 .req-list small { color: var(--muted); }
 .req-card.big .req-label { font-size: 16px; } .req-card.big .req-num { font-size: 19px; }
+/* 新制：暫停資格、補滿次月恢復 */
+.tone-suspended { --tone: #E8833A; }
+.pill.suspended { background: #FFF1E6; color: #a14a0b; }
+.year.made_up { border-color: var(--success); }
+.g-susp { border-left: 5px solid #E8833A; background: #FFF1E6; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; font-size: 14px; }
+.g-susp b { display: block; color: #a14a0b; font-size: 15px; margin-bottom: 2px; }
+
 /* 師生比 */
 .cap-bar { height: 10px; background: #e8edf0; border-radius: 5px; overflow: hidden; margin-bottom: 3px; }
 .cap-bar i { display: block; height: 100%; background: var(--success); border-radius: 5px; } .cap-bar i.over { background: var(--danger); }
