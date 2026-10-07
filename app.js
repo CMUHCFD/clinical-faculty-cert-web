@@ -571,7 +571,9 @@ function roleBar(d) {
   const core = d.coreCourses || [];
   chips.push(['core', core.length ? `${core.length} 門｜${n(core.reduce((a, c) => a + c.hours, 0))} 小時` : '尚無']);
   if (d.facultyCheck) chips.push(['faculty', d.facultyCheck.met ? '符合申請條件' : '尚未符合']);
-  if (d.lecturer) chips.push(['lecturer', `${n(d.lecturer.totalHours)} 小時｜${d.lecturer.count} 個單元`]);
+  if (d.lecturer) chips.push(['lecturer', d.lecturer.byOrg
+    ? `教學部 ${n(d.lecturer.byOrg.cfd.hours)}｜科部 ${n(d.lecturer.byOrg.dept.hours)} 小時`
+    : `${n(d.lecturer.totalHours)} 小時｜${d.lecturer.count} 個單元`]);
   return `<nav class="role-bar" aria-label="資訊區塊">${chips.map(([k, v]) => `<button type="button" class="role-chip rc-${k}" onclick="document.getElementById('blk-${k}').scrollIntoView({behavior:'smooth'})">
     <span>${BLK[k].split('｜')[0]}</span><b>${esc(v)}</b></button>`).join('')}</nav>`;
 }
@@ -593,16 +595,27 @@ function lecturerCard(d) {
   if (!L) return '';
   const n = v => Math.round((Number(v) || 0) * 10) / 10;
   const years = Object.keys(L.byYear || {}).sort().reverse();
+  // 依開課單位分「教學部辦」（含 OSCE 中心）與「科部辦」；舊資料沒有 by 欄位時歸教學部
+  const isCfd = c => (c.by || 'cfd') === 'cfd';
+  const sumOf = list => n(list.reduce((a, c) => a + c.hours, 0));
+  const all = L.courses || [];
+  const cfd = all.filter(isCfd), dept = all.filter(c => !isCfd(c));
+  const tag = c => isCfd(c) ? '<span class="org-tag cfd">教學部辦</span>' : `<span class="org-tag dept" title="開課單位">${esc(c.org || '科部辦')}</span>`;
   return `<section class="card">
-    <div class="lect-sum"><div><b class="num">${n(L.totalHours)}</b><span>小時</span></div><div><b class="num">${L.count}</b><span>個課程單元</span></div><div><b class="num">${years.length}</b><span>個年度</span></div></div>
+    <div class="lect-sum lect-org">
+      <div class="cfd"><span>教學部辦</span><b class="num">${sumOf(cfd)}</b><small>小時・${cfd.length} 個單元</small></div>
+      <div class="dept"><span>科部辦</span><b class="num">${sumOf(dept)}</b><small>小時・${dept.length} 個單元</small></div>
+      <div><span>合計</span><b class="num">${n(L.totalHours)}</b><small>小時・${years.length} 個年度</small></div></div>
     ${years.map((y, i) => {
-      const list = (L.courses || []).filter(c => c.date.startsWith(y));
+      const list = all.filter(c => c.date.startsWith(y));
+      const yc = list.filter(isCfd), yd = list.filter(c => !isCfd(c));
       return `<details class="lk-year" ${i === 0 ? 'open' : ''}><summary><span class="lk-yr">${Number(y) - 1911} 年</span>
-        <span class="lk-chips"><span class="lk-chip t">授課 <b>${n(L.byYear[y])}</b> 小時</span><span class="lk-chip">${list.length} 個單元</span></span></summary>
+        <span class="lk-chips"><span class="lk-chip t">教學部辦 <b>${sumOf(yc)}</b> 小時</span><span class="lk-chip dept">科部辦 <b>${sumOf(yd)}</b> 小時</span><span class="lk-chip">${list.length} 個單元</span></span></summary>
         <ul class="lk-list">${list.map(c => `<li><span class="lk-date">${Number(c.date.slice(5, 7))}/${Number(c.date.slice(8, 10))}</span>
-          <span class="lk-title">${esc(c.title)}${c.unit && c.unit !== c.title ? `<small>${esc(c.unit)}</small>` : ''}${c.co > 1 ? `<small>共同授課（${c.co} 位講師）</small>` : ''}</span><span class="lk-h">${n(c.hours)}</span></li>`).join('')}</ul></details>`;
+          <span class="lk-title">${tag(c)} ${esc(c.title)}${c.unit && c.unit !== c.title ? `<small>${esc(c.unit)}</small>` : ''}${c.co > 1 ? `<small>共同授課（${c.co} 位講師）</small>` : ''}</span><span class="lk-h">${n(c.hours)}</span></li>`).join('')}</ul></details>`;
     }).join('')}
-    <div class="note">資料來源：教學系統「教學能力提升」課程的講師欄位，依姓名比對本院名冊歸戶；同名者無法確定是誰，未列入。共同授課的單元，每位講師都列全部時數。</div></section>`;
+    <div class="note">資料來源：教學系統「教學能力提升」課程的講師欄位，依姓名比對本院名冊歸戶；同名者無法確定是誰，未列入。共同授課的單元，每位講師都列全部時數。
+      依「開課單位」區分：教學部（含 OSCE 中心）開課為「教學部辦」，其他科部或單位開課為「科部辦」。</div></section>`;
 }
 
 // ---------- 他院轉任：上傳原醫院的臨床教師認證證書，師培中心查證後以展延教師列管 ----------
