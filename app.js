@@ -669,8 +669,18 @@ function facultyCard(d, o = {}) {
     <ul class="req-list">${f.items.map(q => `<li class="${q.met ? 'met' : ''}"><div class="req-top"><span class="req-mark">${q.met ? '✓' : '○'}</span><span class="req-label">${esc(q.label)}</span>
       <span class="req-num num">${q.have} / ${q.need} ${esc(q.unit)}</span></div>
       <div class="bar"><i style="width:${Math.min(100, q.have / q.need * 100)}%"></i></div>
-      <small>${q.met ? '已符合' : `還差 ${Math.round((q.need - q.have) * 10) / 10} ${esc(q.unit)}`}</small></li>`).join('')}</ul>
-    <div class="note">${f.met ? '目前已符合申請教職的師培時數條件。' : '尚未符合；請在送件前補足。'}三年內的時數以今天往回 ${f.windowMonths} 個月計算。</div></section>`;
+      <small>${q.met ? '已符合' : `還差 ${Math.round((q.need - q.have) * 10) / 10} ${esc(q.unit)}`}${q.note ? `｜${esc(q.note)}` : ''}</small></li>`).join('')}</ul>
+    ${tutorList(d.tutor)}
+    <div class="note">${f.met ? '目前已符合申請教職的條件。' : '尚未符合；請在送件前補足。'}三年內的時數以今天往回 ${f.windowMonths} 個月計算。</div></section>`;
+}
+// 教職 tutor 授課紀錄：已認證（教職3年16小時）／待師培中心認證
+function tutorList(t) {
+  if (!t || !(t.sessions || []).length) return '';
+  const n = v => Math.round((Number(v) || 0) * 10) / 10;
+  return `<details class="tutor-list"><summary>三年內 tutor 授課紀錄（${t.sessions.length} 場：已認證 ${n(t.certHours)} 小時、待認證 ${n(t.uncertHours)} 小時）</summary>
+    <ul class="lk-list">${t.sessions.map(s => `<li><span class="lk-date">${esc(s.d.replace(/-/g, '/'))}</span>
+      <span class="lk-title">${s.cert ? '<span class="org-tag cfd">已認證</span>' : '<span class="org-tag dept">待認證</span>'} ${esc(s.t)}<small>${esc(s.cat)}</small></span><span class="lk-h">${n(s.h)}</span></li>`).join('')}</ul>
+    ${t.uncertHours > 0 ? '<p class="hint">「待認證」是課程名稱或類別符合 PBL、OSCE、case study、臨床技能等，但尚未登錄為「教職3年16小時」的授課；已先計入，師培中心會陸續完成認證。</p>' : ''}</details>`;
 }
 
 // 主治醫師年度考核分數：上課時數 → 基本分（級距中標出目前所在級）＋核心教師認證課程加分
@@ -890,7 +900,8 @@ async function renderRules() {
       符合當年度時數規範者，即為當年度臨床教師。<b>醫師不分舊制、新制</b>，一律依上表每年完成。</div>
     ${ph.faculty_promotion ? `<h4 style="margin:16px 0 6px">主治醫師申請教職新聘／升等</h4>
       <ul class="recs"><li>申請前三年內完成「教學能力提升」至少 <b>${ph.faculty_promotion.prior_three_years_teaching_hours ?? 3}</b> 小時</li>
-      <li>申請前一年度完成師培總點數至少 <b>${ph.faculty_promotion.prior_one_year_total_hours ?? 4}</b> 點</li></ul>` : ''}
+      <li>申請前一年度完成師培總點數至少 <b>${ph.faculty_promotion.prior_one_year_total_hours ?? 4}</b> 點</li>
+      <li>申請前三年內擔任 <b>${ph.faculty_promotion.tutor_hours_3y ?? 16}</b> 小時以上教學課程（含 PBL、OSCE、case study 或 clinical skill）之 tutor（以講師授課記錄的「老師授課積分」計）</li></ul>` : ''}
     ${apprRules(ph.vs_appraisal, myCat === 'vs')}</section>`;
 
   const seniorityRows = (R.professions || []).map(p => `<tr${here(myProf && (p.name === myProf))}><td>${esc(p.name)}</td><td class="num">${p.seniority_years} 年</td><td class="num">${p.training_eligibility_years} 年</td></tr>`).join('');
@@ -1723,6 +1734,21 @@ async function showQr(id) {
   state.qrTimer = setInterval(tick, 4000);
 }
 
+// 教職 3 年 16 小時：符合 PBL、OSCE、case study、臨床技能等但尚未認證的 tutor 課程（課程層級；含講師姓名的清單在承辦人本機 out\）
+async function tutorPendingCard() {
+  const { data } = await sb.from('settings').select('value').eq('key', 'tutor_pending').maybeSingle();
+  const v = data && data.value; const list = (v && v.courses) || [];
+  if (!list.length) return '';
+  const n = x => Math.round((Number(x) || 0) * 10) / 10;
+  state.tutorPending = list;
+  return `<section class="card batch"><h3>教職 3 年 16 小時：待認證的 tutor 課程（${list.length} 場次）</h3>
+    <p class="hint">課程名稱或類別符合 PBL、OSCE、case study、臨床技能、臨床診斷學與實習，但認證項目尚未登錄「教職3年16小時」。系統已先計入申請人時數，請陸續在教學系統完成認證。
+      採計 ${esc(v.from)} 起；含講師姓名的明細在您電腦的 out\\教職3年16小時_待認證_日期.xlsx。</p>
+    <details><summary>展開清單</summary><div class="table-wrap"><table><thead><tr><th>開課日期</th><th>課程編號</th><th>課程名稱</th><th>類別</th><th>tutor 人次</th><th>授課積分合計</th></tr></thead><tbody>
+      ${list.slice(0, 300).map(c => `<tr><td>${esc(c.d)}</td><td>${esc(c.no)}</td><td style="white-space:normal">${esc(c.t)}</td><td>${esc(c.cat)}</td><td class="num">${c.tutors}</td><td class="num">${n(c.h)}</td></tr>`).join('')}</tbody></table></div>
+      <button class="btn btn-ghost" type="button" onclick="download('教職3年16小時_待認證課程.csv',[['開課日期','課程編號','課程名稱','類別','tutor人次','授課積分合計'],...state.tutorPending.map(c=>[c.d,c.no,c.t,c.cat,c.tutors,c.h])])">下載 CSV</button></details></section>`;
+}
+
 // ---------- 審查（管理者） ----------
 async function renderReview() {
   const { data: apps, error } = await sb.from('applications').select('*, staff!applications_emp_id_fkey(dept,title,profession)').order('submitted_at', { ascending: false }).limit(200);
@@ -1771,7 +1797,7 @@ async function renderReview() {
       <span class="num">共 <b>${amRows.length}</b> 人</span>
       <button class="btn btn-primary" style="width:auto" type="button" onclick="downloadPec(state.approvedRows, undefined, '核准名單', r => r.app_type)" ${amRows.length ? '' : 'disabled'}>下載衛福部認證申請名單（Excel）</button></div>
     <div class="note">效期用您核准時填寫的效期。按下後請選擇您電腦上的員工名冊（只在瀏覽器內讀取，不會上傳）。他院轉任採認者不列入本名單。</div></section>`;
-  $('content').innerHTML = approvedCard + `<section class="card"><h3>認證申請（${apps.filter(a => a.status === '審核中').length} 件待審）</h3>
+  $('content').innerHTML = approvedCard + await tutorPendingCard() + `<section class="card"><h3>認證申請（${apps.filter(a => a.status === '審核中').length} 件待審）</h3>
     <div class="note">核准後系統會寫入認證效期並重新計算該員狀態；提報醫策會 PEC 平台仍需在您的電腦上產生提報檔（雲端沒有身分證字號）。</div>
     <div class="table-wrap"><table><thead><tr><th>員工編號</th><th>申請</th><th>系統檢核</th><th>審查</th></tr></thead><tbody>
     ${apps.map(row).join('') || '<tr><td colspan="4" class="empty">目前沒有申請</td></tr>'}</tbody></table></div></section>`;
