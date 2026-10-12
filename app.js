@@ -59,6 +59,7 @@ async function act(action, payload, after) {
 // ---------- 登入／開通 ----------
 function showAuth(msg, ok) {
   clearInterval(state.qrTimer);
+  setFab(null);
   $('appView').hidden = true; $('authView').hidden = false;
   $('authMsg').textContent = msg || ''; $('authMsg').className = 'msg' + (ok ? ' ok' : '');
 }
@@ -109,6 +110,7 @@ function showLookup(r) {
     `<section class="card lk-note"><b>這是免登入的唯讀查詢。</b>${how}要報名課程或申請，請先登入；還沒有帳號者，請向科部主管或師培中心索取開通碼。
       <br><small>為保護個資，查詢畫面 10 分鐘後會自動關閉；使用公用電腦時，看完請按右上角「結束查詢」。</small></section>`;
   clearTimeout(state.lkTimer); state.lkTimer = setTimeout(endLookup, 10 * 60e3);
+  setFab('lookup');
   window.scrollTo(0, 0);
 }
 // 免登入查詢的版面（CTML：結論 → 三個關鍵數字 → 下一步 → 依年度分段的明細）
@@ -240,6 +242,7 @@ function lookupHTML(r) {
 function endLookup() {
   clearTimeout(state.lkTimer);
   state.lkAuth = null; if ($('fbDlg') && $('fbDlg').open) $('fbDlg').close();
+  setFab(null);
   $('lkContent').innerHTML = ''; $('lkWho').textContent = '';
   $('lookupView').hidden = true; $('authView').hidden = false; setTab('lookup');
 }
@@ -468,6 +471,7 @@ async function boot() {
   if (isAdmin()) views.push(['logs', '使用紀錄']);
   if (state.role === 'super_admin') views.push(['admin', '管理']);
   logView('login');
+  setFab(isCfd() ? null : 'login');   // 師培中心人員是處理反映的人，不顯示
   $('nav').innerHTML = views.map(([v, t]) => `<button type="button" data-view="${v}">${t}</button>`).join('');
   if ($('empSearch')) $('empSearch').hidden = !(isCfd() || state.role === 'dept_coordinator');
   $('nav').querySelectorAll('button').forEach(b => { b.onclick = () => go(b.dataset.view); });
@@ -1061,6 +1065,12 @@ function openFeedback(mode) {
       dlg.close(); toast(d.message || '已送出');
     } catch (err) { $('fbMsgOut').textContent = err.message; btn.disabled = false; }
   };
+}
+// 右下角的小機器人按鈕：免登入查詢結果頁（lookup）與一般登入者（login）顯示；師培中心人員不顯示
+function setFab(mode) {
+  const b = $('fbFab'); if (!b) return;
+  b.hidden = !mode;
+  b.onclick = mode ? () => openFeedback(mode) : null;
 }
 const feedbackCard = mode => `<section class="card fb-card"><div><b>有問題要反映或諮詢？</b><br><small>例如時數沒有列入、認證狀態有疑問。填寫後師培中心會與您聯絡。</small></div>
   <button class="btn btn-primary" style="width:auto" type="button" onclick="openFeedback('${mode}')">問題反映／諮詢</button></section>`;

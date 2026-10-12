@@ -119,6 +119,23 @@ form input { display: block; width: 100%; margin-top: 4px; padding: 10px 12px; b
 
 details.tutor-list > summary { cursor: pointer; font-weight: 700; margin: 10px 0 4px; }
 
+/* 右下角小機器人：問題反映／諮詢 */
+.fab { position: fixed; right: 18px; bottom: 18px; z-index: 50; width: 64px; height: 64px; border-radius: 50%; border: 0; cursor: pointer;
+  background: var(--primary); color: #fff; box-shadow: 0 6px 18px rgba(22,70,97,.35); display: grid; place-items: center; padding: 8px;
+  transition: transform .15s; animation: fab-in .4s ease-out; }
+.fab[hidden] { display: none; }
+.fab svg { width: 44px; height: 44px; }
+.fab:hover { transform: translateY(-2px) scale(1.05); }
+.fab:focus-visible { outline: 3px solid var(--warning); outline-offset: 3px; }
+.fab-tip { position: absolute; right: 74px; bottom: 16px; background: var(--primary-dark); color: #fff; font-size: 13px; font-weight: 700;
+  padding: 6px 10px; border-radius: 8px; white-space: nowrap; opacity: 0; transform: translateX(6px); transition: .15s; pointer-events: none; }
+.fab:hover .fab-tip, .fab:focus-visible .fab-tip { opacity: 1; transform: none; }
+@keyframes fab-in { from { transform: scale(.4); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .fab { animation: none; transition: none; } }
+@media (max-width: 480px) { .fab { right: 12px; bottom: 12px; width: 56px; height: 56px; } .fab svg { width: 38px; height: 38px; } .fab-tip { display: none; } }
+@media print { .fab { display: none !important; } }
+.content { padding-bottom: 90px; }   /* 讓頁尾內容不被小機器人擋住 */
+
 /* 問題反映／諮詢 */
 .fb-card { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; border-left: 5px solid var(--secondary); }
 .fb-card small { color: var(--muted); }
