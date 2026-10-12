@@ -458,8 +458,13 @@ async function boot() {
   if (state.role === 'dept_coordinator') views.push(['dept', '科部總覽'], ['expiry', '到期與提報']);
   views.push(['mine', '我的認證'], ['courses', '課程'], ['rules', '認證規範']);
   if (isAdmin()) views.push(['review', '審查'], ['calls', '來電紀錄']);
-  if (isAdmin() || state.role === 'dept_coordinator') views.push(['plan', '訓練計畫'], ['coursestats', '課程辦理'], ['roster', '追蹤名單'], ['ratio', '師生比']);
-  if (state.role === 'cfd_staff') views.push(['coursestats', '課程辦理'], ['ratio', '師生比']);
+  // 課程辦理：最高管理者看全部；其他人只有在擔任某些課程的承辦人時才出現（資料列權限只回傳自己的課）
+  let myCourses = 0;
+  if (state.role !== 'super_admin') { try { const { count } = await sb.from('course_stats').select('id', { count: 'exact', head: true }); myCourses = count || 0; } catch (e) { /* 012 尚未執行 */ } }
+  const showCs = state.role === 'super_admin' || myCourses > 0;
+  if (isAdmin() || state.role === 'dept_coordinator') views.push(['plan', '訓練計畫'], ...(showCs ? [['coursestats', '課程辦理']] : []), ['roster', '追蹤名單'], ['ratio', '師生比']);
+  else if (state.role === 'cfd_staff') views.push(...(showCs ? [['coursestats', '課程辦理']] : []), ['ratio', '師生比']);
+  else if (showCs) views.push(['coursestats', '課程辦理']);
   if (isAdmin()) views.push(['logs', '使用紀錄']);
   if (state.role === 'super_admin') views.push(['admin', '管理']);
   logView('login');
@@ -1240,9 +1245,10 @@ async function callDone(id) { const d = await act('call.update', { id, status: '
 // 資料：每次同步由本機彙總的課程層級統計（settings.course_stats），不含個人資料
 const CAT_NAME = { general: '一般醫學', teaching: '教學能力提升' };
 async function renderCourseStats() {
-  const { data } = await sb.from('settings').select('value').eq('key', 'course_stats').maybeSingle();
-  const all = (data && data.value && data.value.courses) || [];
-  if (!all.length) { $('content').innerHTML = '<div class="card empty">尚無課程辦理資料，師培中心執行同步（node tools/sync-up.js）後會顯示。</div>'; return; }
+  // 資料列權限：最高管理者看全部；其他人只看得到自己擔任承辦人的課程
+  const raw = await fetchAll(() => sb.from('course_stats').select('*').order('course_date'));
+  const all = raw.map(x => ({ c: x.cat, t: x.title, d: x.course_date, o: x.org, by: x.by_org, f: x.form || '', io: x.inout || '', h: Number(x.hours) || 0, p: x.passed, pr: x.prof || {}, orgz: x.organizer_names || '' }));
+  if (!all.length) { $('content').innerHTML = `<div class="card empty">${state.role === 'super_admin' ? '尚無課程辦理資料，請執行同步（node tools/sync-up.js）。' : '目前沒有您擔任承辦人的一般醫學或教學能力提升課程。'}</div>`; return; }
   const years = [...new Set(all.map(c => c.d.slice(0, 4)))].sort().reverse();
   const f = state.cs = state.cs || { year: years[0], cat: '', by: '', q: '' };
   if (!years.includes(f.year)) f.year = years[0];
@@ -1284,7 +1290,7 @@ async function renderCourseStats() {
         <div class="seg" role="tablist">${[['', '全部'], ['general', '一般醫學'], ['teaching', '教學能力提升']].map(([v, t]) => `<button type="button" class="${f.cat === v ? 'is-active' : ''}" onclick="state.cs.cat='${v}';renderCourseStats()">${t}</button>`).join('')}</div>
         <div class="seg">${[['', '所有開課單位'], ['cfd', '教學部辦'], ['dept', '科部辦']].map(([v, t]) => `<button type="button" class="${f.by === v ? 'is-active' : ''}" onclick="state.cs.by='${v}';renderCourseStats()">${t}</button>`).join('')}</div>
       </div>
-      <p class="hint">資料來源：教學系統「詳細修課紀錄」報表（一般醫學、教學能力提升）。參與人次＝通過人次，同一人同一門課只算一次；課程依「認證項目」歸類。</p></section>
+      <p class="hint">${state.role === 'super_admin' ? '最高管理者：顯示全院課程。' : '只顯示<b>您擔任承辦人</b>的課程。'}資料來源：教學系統「詳細修課紀錄」報表（一般醫學、教學能力提升）。參與人次＝通過人次，同一人同一門課只算一次；課程依「認證項目」歸類。</p></section>
     <section class="cs-kpis">${!f.cat || f.cat === 'general' ? kpi('general') : ''}${!f.cat || f.cat === 'teaching' ? kpi('teaching') : ''}</section>
     <section class="card"><h3>${Number(f.year) - 1911} 年逐月辦理情形</h3>${monthChart}</section>
     <section class="cs-two">
@@ -1303,14 +1309,14 @@ async function renderCourseStats() {
       ${top.map(c => `<tr><td>${esc(c.d)}</td><td>${CAT_NAME[c.c]}</td><td style="white-space:normal">${esc(c.t)}</td><td>${esc(c.o)}</td><td>${esc(c.f)}</td><td class="num"><b>${c.p.toLocaleString()}</b></td></tr>`).join('')}</tbody></table></div></section>
     <section class="card"><h3>課程清單（${listRows.length} 門）</h3>
       <div class="filters"><input id="csQ" type="search" placeholder="搜尋課程名稱或開課單位" value="${esc(f.q)}" style="flex:1"><button class="btn btn-ghost" type="button" id="csCsv">下載 CSV</button></div>
-      <div class="table-wrap"><table><thead><tr><th>日期</th><th>類別</th><th>課程名稱</th><th>開課單位</th><th>形式</th><th>認證時數</th><th>通過人次</th><th>護理／醫師／醫事／其他</th></tr></thead><tbody>
-      ${listRows.slice(0, 300).map(c => `<tr><td>${esc(c.d)}</td><td>${CAT_NAME[c.c]}</td><td style="white-space:normal;min-width:200px">${esc(c.t)}</td><td>${esc(c.o)}</td><td>${esc(c.f)}</td><td class="num">${n(c.h)}</td><td class="num">${c.p.toLocaleString()}</td>
+      <div class="table-wrap"><table><thead><tr><th>日期</th><th>類別</th><th>課程名稱</th><th>開課單位</th><th>承辦人</th><th>形式</th><th>認證時數</th><th>通過人次</th><th>護理／醫師／醫事／其他</th></tr></thead><tbody>
+      ${listRows.slice(0, 300).map(c => `<tr><td>${esc(c.d)}</td><td>${CAT_NAME[c.c]}</td><td style="white-space:normal;min-width:200px">${esc(c.t)}</td><td>${esc(c.o)}</td><td style="white-space:normal">${esc(c.orgz)}</td><td>${esc(c.f)}</td><td class="num">${n(c.h)}</td><td class="num">${c.p.toLocaleString()}</td>
         <td class="num">${['護理', '醫師', '醫事', '其他'].map(k => (c.pr || {})[k] || 0).join('／')}</td></tr>`).join('')}</tbody></table></div>
       ${listRows.length > 300 ? '<p class="hint">畫面顯示前 300 門，完整清單請下載 CSV。</p>' : ''}</section>`;
   $('csYear').onchange = e => { f.year = e.target.value; renderCourseStats(); };
   $('csQ').onchange = e => { f.q = e.target.value; renderCourseStats(); };
-  $('csCsv').onclick = () => download(`課程辦理_${Number(f.year) - 1911}年.csv`, [['日期', '類別', '課程名稱', '開課單位', '教學部辦／科部辦', '形式', '內外訓', '認證時數', '通過人次', '護理', '醫師', '醫事', '其他'],
-    ...listRows.map(c => [c.d, CAT_NAME[c.c], c.t, c.o, c.by === 'cfd' ? '教學部辦' : '科部辦', c.f, c.io, n(c.h), c.p, ...['護理', '醫師', '醫事', '其他'].map(k => (c.pr || {})[k] || 0)])]);
+  $('csCsv').onclick = () => download(`課程辦理_${Number(f.year) - 1911}年.csv`, [['日期', '類別', '課程名稱', '開課單位', '教學部辦／科部辦', '承辦人', '形式', '內外訓', '認證時數', '通過人次', '護理', '醫師', '醫事', '其他'],
+    ...listRows.map(c => [c.d, CAT_NAME[c.c], c.t, c.o, c.by === 'cfd' ? '教學部辦' : '科部辦', c.orgz, c.f, c.io, n(c.h), c.p, ...['護理', '醫師', '醫事', '其他'].map(k => (c.pr || {})[k] || 0)])]);
 }
 
 // ---------- 職類別管理人：勾選要監測的單位（例如護理職類管理人勾選護理單位） ----------
