@@ -119,6 +119,18 @@ form input { display: block; width: 100%; margin-top: 4px; padding: 10px 12px; b
 
 details.tutor-list > summary { cursor: pointer; font-weight: 700; margin: 10px 0 4px; }
 
+/* 問題反映／諮詢 */
+.fb-card { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; border-left: 5px solid var(--secondary); }
+.fb-card small { color: var(--muted); }
+.fb-form label { margin-bottom: 10px; }
+.fb-form textarea { width: 100%; border: 1.5px solid var(--line); border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 15px; margin-top: 4px; }
+.fb-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.fb-item { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.fb-item.pend { border-color: #E2B65C; background: #FFFDF5; }
+.fb-top { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; font-size: 14px; }
+.fb-top small { color: var(--muted); margin-left: auto; }
+.fb-msg { margin: 6px 0; font-size: 14.5px; white-space: pre-wrap; }
+
 /* 使用紀錄 */
 .log-chart { height: 160px; gap: 2px; } .log-chart .cs-bars i { width: 30%; }
 .lg0 { background: var(--primary) !important; } .lg1 { background: var(--success) !important; } .lg2 { background: var(--warning) !important; }

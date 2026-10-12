@@ -90,6 +90,8 @@ if ($('lookupForm')) $('lookupForm').onsubmit = async e => {
     });
     const data = await res.json().catch(() => ({}));
     if (!data.success) return showAuth(data.message || '查詢失敗，請稍後再試。');
+    // 送出問題反映時需要再次驗證：只暫存在記憶體，結束查詢或 10 分鐘後清除
+    state.lkAuth = { emp: data.emp_id, last4: $('lkLast4').value.trim(), name: data.name };
     showLookup(data);
   } catch (err) { showAuth('無法連線到查詢服務，請稍後再試。'); }
 };
@@ -103,7 +105,7 @@ function showLookup(r) {
     ? '新制的臨床教師認證由科部主管統一提報，符合資格者不需要自行申請。'
     : '符合資格者請登入系統，在「我的認證」按「申請臨床教師認證」。';
   // 結論放最前面，使用說明放最後
-  $('lkContent').innerHTML = lookupHTML(r) +
+  $('lkContent').innerHTML = lookupHTML(r) + feedbackCard('lookup') +
     `<section class="card lk-note"><b>這是免登入的唯讀查詢。</b>${how}要報名課程或申請，請先登入；還沒有帳號者，請向科部主管或師培中心索取開通碼。
       <br><small>為保護個資，查詢畫面 10 分鐘後會自動關閉；使用公用電腦時，看完請按右上角「結束查詢」。</small></section>`;
   clearTimeout(state.lkTimer); state.lkTimer = setTimeout(endLookup, 10 * 60e3);
@@ -237,6 +239,7 @@ function lookupHTML(r) {
 }
 function endLookup() {
   clearTimeout(state.lkTimer);
+  state.lkAuth = null; if ($('fbDlg') && $('fbDlg').open) $('fbDlg').close();
   $('lkContent').innerHTML = ''; $('lkWho').textContent = '';
   $('lookupView').hidden = true; $('authView').hidden = false; setTab('lookup');
 }
@@ -873,7 +876,8 @@ function personHTML(o) {
     + block('core', coreCard(d))
     + block('faculty', facultyCard(d), '新聘／升等')
     + block('lecturer', lecturerCard(d), '擔任教學能力提升課程講師')
-    + block('records', appList + recs);   // 結論 → 我的身分要完成什麼 → 下一步 → 細節
+    + block('records', appList + recs)   // 結論 → 我的身分要完成什麼 → 下一步 → 細節
+    + (own && !o.lookup && !o.admin ? feedbackCard('login') : '');
 }
 
 // 認證規範頁：主治醫師年度考核分數的計分方式
@@ -1013,6 +1017,69 @@ async function renderRatio() {
   $('rMonth').onchange = e => { state.ratioMonth = e.target.value; renderRatio(); };
 }
 
+// ---------- 問題反映／諮詢：免登入查詢者與登入者都可填寫，師培中心在「來電紀錄」頁處理 ----------
+function openFeedback(mode) {
+  const lookup = mode === 'lookup';
+  if (lookup && !state.lkAuth) return toast('請先完成查詢', false);
+  const emp = lookup ? state.lkAuth.emp : state.me.emp_id;
+  const name = lookup ? '' : (state.me.name || '');
+  let dlg = $('fbDlg');
+  if (!dlg) { dlg = document.createElement('dialog'); dlg.id = 'fbDlg'; dlg.className = 'small-dlg'; document.body.appendChild(dlg); }
+  dlg.innerHTML = `<form id="fbForm" class="dlg-body fb-form" autocomplete="off">
+    <div class="dlg-head"><h3>問題反映／諮詢</h3><button class="btn btn-ghost" type="button" onclick="$('fbDlg').close()">關閉</button></div>
+    <p class="hint">師培中心收到後，會依您留下的電話與您聯絡。</p>
+    <label>員工編號<input value="${esc(emp)}" disabled></label>
+    <label>姓名 <span class="req">*必填</span><input id="fbName" required maxlength="40" value="${esc(name)}"></label>
+    <label>連絡電話（分機或手機） <span class="req">*必填</span><input id="fbPhone" required maxlength="40" inputmode="tel" placeholder="例如 2345 或 0912-345678"></label>
+    <label>方便聯絡的時段（選填）<input id="fbTime" maxlength="60" placeholder="例如 平日下午"></label>
+    <div class="call-cats"><span class="lbl">問題類別</span>${CALL_CATS.map((c, i) => `<label class="chip-r"><input type="radio" name="fbCat" value="${esc(c)}" ${i === 0 ? 'checked' : ''}><span>${esc(c)}</span></label>`).join('')}</div>
+    <label>內容 <span class="req">*必填</span><textarea id="fbMsg" required rows="4" maxlength="2000" placeholder="請描述您的問題，例如：我的某堂課沒有列入時數"></textarea></label>
+    <p id="fbMsgOut" class="msg"></p>
+    <button class="btn btn-primary" type="submit">送出</button></form>`;
+  dlg.showModal();
+  setTimeout(() => (name ? $('fbPhone') : $('fbName')).focus(), 0);
+  $('fbForm').onsubmit = async e => {
+    e.preventDefault();
+    const body = { name: $('fbName').value.trim(), phone: $('fbPhone').value.trim(), contact_time: $('fbTime').value.trim(),
+      category: (document.querySelector('input[name=fbCat]:checked') || {}).value || '', message: $('fbMsg').value.trim() };
+    if (!body.name || !body.phone || !body.message) { $('fbMsgOut').textContent = '請填寫姓名、連絡電話與內容。'; return; }
+    const btn = $('fbForm').querySelector('button[type=submit]'); btn.disabled = true;
+    try {
+      let d;
+      if (lookup) {
+        const res = await fetch(`${window.APP_CONFIG.url}/functions/v1/lookup`, { method: 'POST',
+          headers: { 'Content-Type': 'application/json', apikey: window.APP_CONFIG.anonKey, Authorization: `Bearer ${window.APP_CONFIG.anonKey}` },
+          body: JSON.stringify({ action: 'feedback', emp_id: state.lkAuth.emp, last4: state.lkAuth.last4, ...body }) });
+        d = await res.json().catch(() => ({}));
+        if (!d.success) throw new Error(d.message || '送出失敗，請稍後再試。');
+      } else d = await api('feedback.submit', body);
+      dlg.close(); toast(d.message || '已送出');
+    } catch (err) { $('fbMsgOut').textContent = err.message; btn.disabled = false; }
+  };
+}
+const feedbackCard = mode => `<section class="card fb-card"><div><b>有問題要反映或諮詢？</b><br><small>例如時數沒有列入、認證狀態有疑問。填寫後師培中心會與您聯絡。</small></div>
+  <button class="btn btn-primary" style="width:auto" type="button" onclick="openFeedback('${mode}')">問題反映／諮詢</button></section>`;
+
+// 師培中心處理線上反映
+async function feedbackInbox() {
+  const { data, error } = await sb.from('feedback').select('*, who:staff!feedback_emp_id_fkey(dept)').order('created_at', { ascending: false }).limit(200);
+  if (error) return '';
+  const list = data || [];
+  const pend = list.filter(x => x.status === '待處理');
+  state.fbList = list;
+  const when = t => new Date(t).toLocaleString('zh-TW', { hour12: false, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const item = x => `<li class="fb-item ${x.status === '待處理' ? 'pend' : ''}"><div class="fb-top"><b>${esc(x.name)}</b> ${esc(x.emp_id)}｜${esc(x.who?.dept || '')}｜☎ <b>${esc(x.phone)}</b>${x.contact_time ? `（${esc(x.contact_time)}）` : ''}
+      <span class="pill ${x.status === '待處理' ? 'expiring' : 'valid'}">${esc(x.status)}</span><small>${when(x.created_at)}・${x.source === 'lookup' ? '免登入查詢' : '登入後'}</small></div>
+    <div class="fb-msg">${x.category ? `<span class="org-tag dept">${esc(x.category)}</span> ` : ''}${esc(x.message)}</div>
+    ${x.status === '待處理' ? `<div class="filters"><input id="fbR-${Number(x.id)}" placeholder="處理說明（選填）" style="flex:1"><button class="btn btn-ghost" type="button" onclick="go('person','${esc(x.emp_id)}')">看個人頁</button>
+      <button class="btn btn-primary" style="width:auto" type="button" onclick="feedbackDone(${Number(x.id)})">已回覆</button></div>` : (x.reply ? `<small>處理說明：${esc(x.reply)}</small>` : '')}</li>`;
+  return `<section class="card ${pend.length ? 'attention-card' : ''}"><h3>線上反映（待處理 ${pend.length}）</h3>
+    ${list.length ? `<ul class="fb-list">${pend.map(item).join('')}</ul>
+      ${list.length > pend.length ? `<details><summary>已回覆（${list.length - pend.length}）</summary><ul class="fb-list">${list.filter(x => x.status !== '待處理').slice(0, 50).map(item).join('')}</ul></details>` : ''}`
+      : '<p class="hint" style="margin:0">尚無線上反映。同仁可在「免登入查詢」結果頁或「我的認證」頁按「問題反映／諮詢」填寫。</p>'}</section>`;
+}
+async function feedbackDone(id) { const d = await act('feedback.update', { id, status: '已回覆', reply: $(`fbR-${id}`) ? $(`fbR-${id}`).value : '' }); if (d) renderCalls(); }
+
 // ---------- 使用紀錄（管理者）：誰在什麼時候登入、查看了誰、免登入查詢、資料異動 ----------
 const LOG_TYPES = { login: ['登入系統'], person: ['查看個人頁'], search: ['員工編號查詢'], lookup: ['免登入查詢'] };
 async function renderLogs() {
@@ -1092,6 +1159,7 @@ async function renderCalls() {
   const { data: pend } = await sb.from('call_logs').select('*, caller:staff!call_logs_emp_id_fkey(name,dept)').eq('status', '待回電').order('called_at').limit(200);
   const rows = (data || []).filter(c => (!f.cat || c.category === f.cat) && (!f.status || c.status === f.status) &&
     (!f.q || c.emp_id.toLowerCase().includes(f.q.toLowerCase()) || (c.caller?.name || '').includes(f.q) || (c.question || '').includes(f.q)));
+  const inbox = await feedbackInbox();
   const tCount = (data || []).filter(c => new Date(new Date(c.called_at).getTime() + 8 * 3600e3).toISOString().slice(0, 10) === today()).length;   // 台灣時間的今天
   const catN = {}; (data || []).forEach(c => { const k = c.category || '未分類'; catN[k] = (catN[k] || 0) + 1; });
   const maxC = Math.max(1, ...Object.values(catN));
@@ -1108,6 +1176,7 @@ async function renderCalls() {
         <div class="wide call-actions"><label class="check"><input type="checkbox" id="cPend"> 需要回電（標為「待回電」）</label>
           <button class="btn btn-primary" style="width:auto" type="submit">儲存來電紀錄</button></div>
       </form></section>
+    ${inbox}
     <section class="kpis">
       <div class="kpi"><b class="num">${tCount}</b><span>今日來電</span></div>
       <div class="kpi" style="--tone:var(--secondary)"><b class="num">${(data || []).length}</b><span>${{ today: '今日', week: '近 7 天', month: '本月', all: '全部' }[f.range]}來電</span></div>
