@@ -117,6 +117,33 @@ form input { display: block; width: 100%; margin-top: 4px; padding: 10px 12px; b
 .person-name { font-size: 22px; font-weight: 800; color: var(--primary-dark); margin-bottom: 6px; }
 .person-name small { display: block; font-size: 13.5px; font-weight: 400; color: var(--muted); }
 
+/* 課程辦理狀況 */
+:root { --cs-g: #2575A1; --cs-t: #48B6A2; }
+.seg { display: inline-flex; background: var(--bg); border-radius: 8px; padding: 3px; gap: 2px; }
+.seg button { border: 0; background: transparent; padding: 6px 12px; border-radius: 6px; font-weight: 700; color: var(--muted); cursor: pointer; font-size: 13.5px; }
+.seg button.is-active { background: #fff; color: var(--primary); box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+.cs-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+.cs-kpi { border-top: 5px solid var(--c); } .cs-general { --c: var(--cs-g); } .cs-teaching { --c: var(--cs-t); }
+.cs-kpi h3 { color: var(--c); filter: brightness(.85); }
+.cs-kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 8px 0; }
+.cs-kpi-row div { display: grid; } .cs-kpi-row b { font-size: 22px; color: var(--primary-dark); } .cs-kpi-row span { font-size: 12.5px; color: var(--muted); }
+.cs-kpi small { color: var(--muted); }
+.cs-chart { display: grid; grid-template-columns: repeat(12, 1fr); gap: 6px; height: 220px; align-items: end; margin: 8px 0; }
+.cs-col { display: grid; grid-template-rows: 1fr auto auto; height: 100%; text-align: center; min-width: 0; }
+.cs-bars { display: flex; align-items: flex-end; justify-content: center; gap: 2px; border-bottom: 1px solid var(--line); }
+.cs-bars i { display: block; width: 42%; border-radius: 3px 3px 0 0; min-height: 1px; }
+.cs-bars i.g { background: var(--cs-g); } .cs-bars i.t { background: var(--cs-t); }
+.cs-m { font-size: 12px; font-weight: 700; margin-top: 4px; } .cs-col small { font-size: 11px; color: var(--muted); }
+.cs-two { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+.cs-hbar { display: grid; grid-template-columns: minmax(0, 9em) 1fr auto; gap: 8px; align-items: center; margin: 6px 0; font-size: 13.5px; }
+.cs-hl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cs-ht { height: 12px; background: #eef1f3; border-radius: 6px; overflow: hidden; }
+.cs-ht i { display: block; height: 100%; border-radius: 6px; } .cs-ht i.cfd { background: #3F8233; } .cs-ht i.dept { background: #C7891A; }
+.cs-hbar small { color: var(--muted); }
+.cs-stack { display: flex; height: 18px; border-radius: 9px; overflow: hidden; margin: 8px 0; } .cs-stack i { display: block; height: 100%; }
+.cs-form { display: flex; gap: 6px; align-items: baseline; padding: 4px 0; border-bottom: 1px solid var(--line); font-size: 14px; } .cs-form span { flex: 1; }
+@media (max-width: 480px) { .cs-kpi-row { grid-template-columns: repeat(2, 1fr); } .cs-chart { gap: 2px; } .cs-m { font-size: 10.5px; } .cs-col small { display: none; } }
+
 /* 職類別管理人：監測單位 */
 .scope-card { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; border-left: 5px solid var(--primary); }
 .unit-list { max-height: 50vh; overflow: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 4px 12px; border: 1px solid var(--line); border-radius: 8px; padding: 8px; }

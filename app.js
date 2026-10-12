@@ -440,7 +440,7 @@ async function boot() {
   if (state.role === 'dept_coordinator') views.push(['dept', '科部總覽'], ['expiry', '到期與提報']);
   views.push(['mine', '我的認證'], ['courses', '課程'], ['rules', '認證規範']);
   if (isAdmin()) views.push(['review', '審查']);
-  if (isAdmin() || state.role === 'dept_coordinator') views.push(['plan', '訓練計畫'], ['roster', '追蹤名單'], ['ratio', '師生比']);
+  if (isAdmin() || state.role === 'dept_coordinator') views.push(['plan', '訓練計畫'], ['coursestats', '課程辦理'], ['roster', '追蹤名單'], ['ratio', '師生比']);
   if (state.role === 'super_admin') views.push(['admin', '管理']);
   $('nav').innerHTML = views.map(([v, t]) => `<button type="button" data-view="${v}">${t}</button>`).join('');
   if ($('empSearch')) $('empSearch').hidden = !(isAdmin() || state.role === 'dept_coordinator');
@@ -464,7 +464,7 @@ function go(view, arg) {
   $('nav').querySelectorAll('button').forEach(b => b.classList.toggle('is-active', b.dataset.view === view));
   $('content').innerHTML = '<div class="card empty">載入中…</div>';
   const run = { mine: () => renderPerson(state.me.emp_id), person: () => renderPerson(arg, true), dept: renderList, all: renderOverview,
-    courses: renderCourses, rules: renderRules, ratio: renderRatio, plan: () => { state.planId = arg || null; return renderPlanPage(); }, review: renderReview, roster: renderRoster, admin: renderAdmin, expiry: renderExpiry }[view];
+    courses: renderCourses, rules: renderRules, ratio: renderRatio, coursestats: renderCourseStats, plan: () => { state.planId = arg || null; return renderPlanPage(); }, review: renderReview, roster: renderRoster, admin: renderAdmin, expiry: renderExpiry }[view];
   // 連續快速切換頁面時，較早的頁面可能較晚才載完而蓋掉畫面：發現過期就重畫目前頁面
   const token = state.nav = (state.nav || 0) + 1;
   state.arg = arg;
@@ -981,6 +981,83 @@ async function renderRatio() {
       <div class="note">師生比以「有效認證教師」計算。醫策會教師認證資料只列現職人員，名單上已離職的教師無法回溯查證，仍計入教師、另行標示。資料來源：${esc(M.file)}；教師認證比對：${esc(M.pecFile || '')}。</div></section>
     ${trend}`;
   $('rMonth').onchange = e => { state.ratioMonth = e.target.value; renderRatio(); };
+}
+
+// ---------- 課程辦理狀況：一般醫學、教學能力提升課程的課程數、通過人次、開課單位、形式、參與者職類 ----------
+// 資料：每次同步由本機彙總的課程層級統計（settings.course_stats），不含個人資料
+const CAT_NAME = { general: '一般醫學', teaching: '教學能力提升' };
+async function renderCourseStats() {
+  const { data } = await sb.from('settings').select('value').eq('key', 'course_stats').maybeSingle();
+  const all = (data && data.value && data.value.courses) || [];
+  if (!all.length) { $('content').innerHTML = '<div class="card empty">尚無課程辦理資料，師培中心執行同步（node tools/sync-up.js）後會顯示。</div>'; return; }
+  const years = [...new Set(all.map(c => c.d.slice(0, 4)))].sort().reverse();
+  const f = state.cs = state.cs || { year: years[0], cat: '', by: '', q: '' };
+  if (!years.includes(f.year)) f.year = years[0];
+  const n = v => Math.round((Number(v) || 0) * 10) / 10;
+  const inYear = all.filter(c => c.d.startsWith(f.year));
+  const rows = inYear.filter(c => (!f.cat || c.c === f.cat) && (!f.by || c.by === f.by));
+  const kpi = cat => {
+    const L = inYear.filter(c => c.c === cat && (!f.by || c.by === f.by));
+    const p = L.reduce((a, c) => a + c.p, 0), ph = L.reduce((a, c) => a + c.p * c.h, 0);
+    return `<div class="card cs-kpi cs-${cat}"><h3>${CAT_NAME[cat]}</h3>
+      <div class="cs-kpi-row"><div><b class="num">${L.length}</b><span>辦理課程</span></div><div><b class="num">${p.toLocaleString()}</b><span>參與人次（通過）</span></div>
+        <div><b class="num">${L.length ? Math.round(p / L.length) : 0}</b><span>平均每門人次</span></div><div><b class="num">${Math.round(ph).toLocaleString()}</b><span>人時</span></div></div>
+      <small>教學部辦 ${L.filter(c => c.by === 'cfd').length} 門・科部辦 ${L.filter(c => c.by === 'dept').length} 門・線上 ${L.filter(c => c.f === '線上').length} 門</small></div>`;
+  };
+  // 逐月：兩類課程的通過人次（長條）與課程數
+  const months = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, '0'));
+  const byMonth = cat => months.map(m => inYear.filter(c => c.c === cat && c.d.slice(5, 7) === m && (!f.by || c.by === f.by)));
+  const gm = byMonth('general'), tm = byMonth('teaching');
+  const maxP = Math.max(1, ...months.map((_, i) => Math.max(gm[i].reduce((a, c) => a + c.p, 0), tm[i].reduce((a, c) => a + c.p, 0))));
+  const monthChart = `<div class="cs-chart" role="img" aria-label="${f.year - 1911} 年逐月通過人次">
+    ${months.map((m, i) => { const gp = gm[i].reduce((a, c) => a + c.p, 0), tp = tm[i].reduce((a, c) => a + c.p, 0); return `<div class="cs-col">
+      <div class="cs-bars"><i class="g" style="height:${gp / maxP * 100}%" title="一般醫學 ${gp} 人次（${gm[i].length} 門）"></i><i class="t" style="height:${tp / maxP * 100}%" title="教學能力提升 ${tp} 人次（${tm[i].length} 門）"></i></div>
+      <span class="cs-m">${Number(m)} 月</span><small>${gm[i].length + tm[i].length} 門</small></div>`; }).join('')}</div>
+    <div class="legend"><span><i style="background:var(--cs-g)"></i>一般醫學</span><span><i style="background:var(--cs-t)"></i>教學能力提升</span>　<small class="hint">長條＝通過人次；下方＝課程數（滑鼠移到長條可看數字）</small></div>`;
+  // 開課單位（前 12）、形式、參與者職類
+  const agg = (list, keyOf) => { const m = {}; list.forEach(c => { const k = keyOf(c); m[k] = m[k] || { n: 0, p: 0 }; m[k].n++; m[k].p += c.p; }); return Object.entries(m).sort((a, b) => b[1].p - a[1].p); };
+  const orgs = agg(rows, c => c.o).slice(0, 12), maxO = Math.max(1, ...orgs.map(o => o[1].p));
+  const forms = agg(rows, c => `${c.f || '未註明'}${c.io ? '・' + c.io : ''}`);
+  const pr = {}; rows.forEach(c => Object.entries(c.pr || {}).forEach(([k, v]) => { pr[k] = (pr[k] || 0) + v; }));
+  const prTotal = Object.values(pr).reduce((a, b) => a + b, 0) || 1;
+  const PR_COLOR = { 護理: '#2575A1', 醫師: '#13A3B8', 醫事: '#48B6A2', 其他: '#A7ACAF' };
+  const top = [...rows].sort((a, b) => b.p - a.p).slice(0, 10);
+  const q = f.q.trim();
+  const listRows = rows.filter(c => !q || c.t.includes(q) || c.o.includes(q)).sort((a, b) => b.d.localeCompare(a.d));
+  $('content').innerHTML = `
+    <section class="card"><h3>課程辦理狀況</h3>
+      <div class="filters" style="align-items:center">
+        <label style="margin:0;font-weight:700">年度 <select id="csYear" style="display:inline-block;width:auto">${years.map(y => `<option value="${y}" ${y === f.year ? 'selected' : ''}>${Number(y) - 1911} 年</option>`).join('')}</select></label>
+        <div class="seg" role="tablist">${[['', '全部'], ['general', '一般醫學'], ['teaching', '教學能力提升']].map(([v, t]) => `<button type="button" class="${f.cat === v ? 'is-active' : ''}" onclick="state.cs.cat='${v}';renderCourseStats()">${t}</button>`).join('')}</div>
+        <div class="seg">${[['', '所有開課單位'], ['cfd', '教學部辦'], ['dept', '科部辦']].map(([v, t]) => `<button type="button" class="${f.by === v ? 'is-active' : ''}" onclick="state.cs.by='${v}';renderCourseStats()">${t}</button>`).join('')}</div>
+      </div>
+      <p class="hint">資料來源：教學系統「詳細修課紀錄」報表（一般醫學、教學能力提升）。參與人次＝通過人次，同一人同一門課只算一次；課程依「認證項目」歸類。</p></section>
+    <section class="cs-kpis">${!f.cat || f.cat === 'general' ? kpi('general') : ''}${!f.cat || f.cat === 'teaching' ? kpi('teaching') : ''}</section>
+    <section class="card"><h3>${Number(f.year) - 1911} 年逐月辦理情形</h3>${monthChart}</section>
+    <section class="cs-two">
+      <div class="card"><h3>開課單位（依通過人次，前 12）</h3>
+        ${orgs.map(([o, v]) => `<div class="cs-hbar"><span class="cs-hl" title="${esc(o)}">${esc(o)}</span><div class="cs-ht"><i style="width:${v.p / maxO * 100}%" class="${o.startsWith('教學部') ? 'cfd' : 'dept'}"></i></div><span class="num">${v.p.toLocaleString()}<small>／${v.n} 門</small></span></div>`).join('') || '<div class="empty">無資料</div>'}
+        <div class="legend"><span><i style="background:#3F8233"></i>教學部辦</span><span><i style="background:#C7891A"></i>科部辦</span></div></div>
+      <div class="card"><h3>參與者職類（通過人次）</h3>
+        <div class="cs-stack">${Object.entries(pr).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<i style="width:${v / prTotal * 100}%;background:${PR_COLOR[k] || '#ccc'}" title="${k} ${v}"></i>`).join('')}</div>
+        <div class="legend">${Object.entries(pr).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<span><i style="background:${PR_COLOR[k] || '#ccc'}"></i>${k} ${v.toLocaleString()}（${Math.round(v / prTotal * 100)}%）</span>`).join('')}</div>
+        <h3 style="margin-top:16px">課程形式</h3>
+        ${forms.map(([k, v]) => `<div class="cs-form"><span>${esc(k)}</span><b class="num">${v.n}</b> 門・<b class="num">${v.p.toLocaleString()}</b> 人次</div>`).join('')}</div>
+    </section>
+    <section class="card"><h3>課程滿意度</h3>
+      <p class="hint" style="margin:0">目前的「詳細修課紀錄」報表沒有滿意度欄位。請從教學系統匯出課程問卷／滿意度報表（含課程編號或課程名稱、滿意度分數），放在專案的「課程滿意度」資料夾，同步後這裡會顯示各課程的平均滿意度與分布。</p></section>
+    <section class="card"><h3>通過人次最多的 10 門課</h3><div class="table-wrap"><table><thead><tr><th>日期</th><th>類別</th><th>課程名稱</th><th>開課單位</th><th>形式</th><th>通過人次</th></tr></thead><tbody>
+      ${top.map(c => `<tr><td>${esc(c.d)}</td><td>${CAT_NAME[c.c]}</td><td style="white-space:normal">${esc(c.t)}</td><td>${esc(c.o)}</td><td>${esc(c.f)}</td><td class="num"><b>${c.p.toLocaleString()}</b></td></tr>`).join('')}</tbody></table></div></section>
+    <section class="card"><h3>課程清單（${listRows.length} 門）</h3>
+      <div class="filters"><input id="csQ" type="search" placeholder="搜尋課程名稱或開課單位" value="${esc(f.q)}" style="flex:1"><button class="btn btn-ghost" type="button" id="csCsv">下載 CSV</button></div>
+      <div class="table-wrap"><table><thead><tr><th>日期</th><th>類別</th><th>課程名稱</th><th>開課單位</th><th>形式</th><th>認證時數</th><th>通過人次</th><th>護理／醫師／醫事／其他</th></tr></thead><tbody>
+      ${listRows.slice(0, 300).map(c => `<tr><td>${esc(c.d)}</td><td>${CAT_NAME[c.c]}</td><td style="white-space:normal;min-width:200px">${esc(c.t)}</td><td>${esc(c.o)}</td><td>${esc(c.f)}</td><td class="num">${n(c.h)}</td><td class="num">${c.p.toLocaleString()}</td>
+        <td class="num">${['護理', '醫師', '醫事', '其他'].map(k => (c.pr || {})[k] || 0).join('／')}</td></tr>`).join('')}</tbody></table></div>
+      ${listRows.length > 300 ? '<p class="hint">畫面顯示前 300 門，完整清單請下載 CSV。</p>' : ''}</section>`;
+  $('csYear').onchange = e => { f.year = e.target.value; renderCourseStats(); };
+  $('csQ').onchange = e => { f.q = e.target.value; renderCourseStats(); };
+  $('csCsv').onclick = () => download(`課程辦理_${Number(f.year) - 1911}年.csv`, [['日期', '類別', '課程名稱', '開課單位', '教學部辦／科部辦', '形式', '內外訓', '認證時數', '通過人次', '護理', '醫師', '醫事', '其他'],
+    ...listRows.map(c => [c.d, CAT_NAME[c.c], c.t, c.o, c.by === 'cfd' ? '教學部辦' : '科部辦', c.f, c.io, n(c.h), c.p, ...['護理', '醫師', '醫事', '其他'].map(k => (c.pr || {})[k] || 0)])]);
 }
 
 // ---------- 職類別管理人：勾選要監測的單位（例如護理職類管理人勾選護理單位） ----------
