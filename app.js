@@ -8,7 +8,9 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const emailOf = emp => `${emp.trim().toLowerCase()}@staff.invalid`;
 const state = { me: null, role: 'general', view: null, list: null, regime: 'legacy', rules: null, qrTimer: null };
 
-const ROLE_LABEL = { general: '一般人員', dept_coordinator: '科部主管', admin: '師培中心管理者', super_admin: '最高管理者' };
+const ROLE_LABEL = { general: '一般人員', dept_coordinator: '科部主管', cfd_staff: '師培中心承辦人員', admin: '師培中心管理者', super_admin: '最高管理者' };
+// 師培中心人員（管理者＋承辦人員）：可查詢全院、記錄來電；審查、授權等仍只限管理者（isAdmin）
+const isCfd = () => isAdmin() || state.role === 'cfd_staff';
 const STATE_LABEL = { met: '已達標', in_progress: '進行中', missed: '未達標（暫停資格）', made_up: '已補足', future: '尚未開始', exempt: '不檢核', window: '採計期間' };
 const BASIC = ['課程設計', '教學技巧', '評估技巧', '教材製作'];
 const ADVANCED = ['跨領域團隊合作照護教學', '全人照護教學', '溝通及輔導', '創新教學導入', '教師教學經驗分享'];
@@ -436,14 +438,16 @@ async function boot() {
   $('whoText').textContent = `${state.me.emp_id}${state.me.name ? ' ' + state.me.name : ''}｜${ROLE_LABEL[state.role]}${scopeLabel}`;
 
   const views = [];
+  if (state.role === 'cfd_staff') views.push(['calls', '來電紀錄'], ['dept', '名單查詢'], ['all', '全院總覽']);   // 承辦人員：以接聽來電、查詢為主
   if (isAdmin()) views.push(['all', '全院總覽'], ['expiry', '到期與提報'], ['dept', '名單查詢']);
   if (state.role === 'dept_coordinator') views.push(['dept', '科部總覽'], ['expiry', '到期與提報']);
   views.push(['mine', '我的認證'], ['courses', '課程'], ['rules', '認證規範']);
-  if (isAdmin()) views.push(['review', '審查']);
+  if (isAdmin()) views.push(['review', '審查'], ['calls', '來電紀錄']);
   if (isAdmin() || state.role === 'dept_coordinator') views.push(['plan', '訓練計畫'], ['coursestats', '課程辦理'], ['roster', '追蹤名單'], ['ratio', '師生比']);
+  if (state.role === 'cfd_staff') views.push(['coursestats', '課程辦理'], ['ratio', '師生比']);
   if (state.role === 'super_admin') views.push(['admin', '管理']);
   $('nav').innerHTML = views.map(([v, t]) => `<button type="button" data-view="${v}">${t}</button>`).join('');
-  if ($('empSearch')) $('empSearch').hidden = !(isAdmin() || state.role === 'dept_coordinator');
+  if ($('empSearch')) $('empSearch').hidden = !(isCfd() || state.role === 'dept_coordinator');
   $('nav').querySelectorAll('button').forEach(b => { b.onclick = () => go(b.dataset.view); });
 
   // 掃描簽到 QR 進來的連結：登入後直接完成簽到
@@ -464,7 +468,7 @@ function go(view, arg) {
   $('nav').querySelectorAll('button').forEach(b => b.classList.toggle('is-active', b.dataset.view === view));
   $('content').innerHTML = '<div class="card empty">載入中…</div>';
   const run = { mine: () => renderPerson(state.me.emp_id), person: () => renderPerson(arg, true), dept: renderList, all: renderOverview,
-    courses: renderCourses, rules: renderRules, ratio: renderRatio, coursestats: renderCourseStats, plan: () => { state.planId = arg || null; return renderPlanPage(); }, review: renderReview, roster: renderRoster, admin: renderAdmin, expiry: renderExpiry }[view];
+    courses: renderCourses, rules: renderRules, ratio: renderRatio, coursestats: renderCourseStats, calls: renderCalls, plan: () => { state.planId = arg || null; return renderPlanPage(); }, review: renderReview, roster: renderRoster, admin: renderAdmin, expiry: renderExpiry }[view];
   // 連續快速切換頁面時，較早的頁面可能較晚才載完而蓋掉畫面：發現過期就重畫目前頁面
   const token = state.nav = (state.nav || 0) + 1;
   state.arg = arg;
@@ -994,6 +998,94 @@ async function renderRatio() {
   $('rMonth').onchange = e => { state.ratioMonth = e.target.value; renderRatio(); };
 }
 
+// ---------- 來電紀錄：師培中心承辦人員接聽同仁詢問時記錄（分機、員工編號必填），並可立即查看來電者進度 ----------
+const CALL_CATS = ['時數查詢', '認證狀態／效期', '申請／展延流程', '課程報名', '帳號開通／密碼', '醫師考核／教職', '他院轉任', '其他'];
+async function renderCalls() {
+  const f = state.callF = state.callF || { range: 'month', cat: '', status: '', q: '' };
+  const now = new Date(Date.now() + 8 * 3600e3);
+  const since = { today: today(), week: new Date(now - 6 * 864e5).toISOString().slice(0, 10), month: today().slice(0, 7) + '-01', all: '2000-01-01' }[f.range];
+  const { data, error } = await sb.from('call_logs')
+    .select('*, caller:staff!call_logs_emp_id_fkey(name,dept), handler:staff!call_logs_handled_by_fkey(name)')
+    .gte('called_at', `${since}T00:00:00+08:00`).order('called_at', { ascending: false }).limit(1000);
+  if (error) throw error;
+  const { data: pend } = await sb.from('call_logs').select('*, caller:staff!call_logs_emp_id_fkey(name,dept)').eq('status', '待回電').order('called_at').limit(200);
+  const rows = (data || []).filter(c => (!f.cat || c.category === f.cat) && (!f.status || c.status === f.status) &&
+    (!f.q || c.emp_id.toLowerCase().includes(f.q.toLowerCase()) || (c.caller?.name || '').includes(f.q) || (c.question || '').includes(f.q)));
+  const tCount = (data || []).filter(c => new Date(new Date(c.called_at).getTime() + 8 * 3600e3).toISOString().slice(0, 10) === today()).length;   // 台灣時間的今天
+  const catN = {}; (data || []).forEach(c => { const k = c.category || '未分類'; catN[k] = (catN[k] || 0) + 1; });
+  const maxC = Math.max(1, ...Object.values(catN));
+  const when = t => new Date(t).toLocaleString('zh-TW', { hour12: false, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  $('content').innerHTML = `
+    <section class="card call-form"><h3>記錄來電</h3>
+      <form id="callForm" class="call-grid" autocomplete="off">
+        <label>分機 <span class="req">*必填</span><input id="cExt" inputmode="numeric" required placeholder="例如 2345"></label>
+        <label>員工編號 <span class="req">*必填</span><input id="cEmp" required placeholder="輸入後顯示來電者資料"></label>
+        <div id="cWho" class="call-who"><span class="hint">輸入員工編號後，這裡會顯示姓名、單位、認證狀態與過去來電。</span></div>
+        <div class="call-cats"><span class="lbl">問題類別</span>${CALL_CATS.map(c => `<label class="chip-r"><input type="radio" name="cCat" value="${esc(c)}"><span>${esc(c)}</span></label>`).join('')}</div>
+        <label class="wide">問題內容<textarea id="cQ" rows="2" placeholder="同仁詢問的內容"></textarea></label>
+        <label class="wide">回覆內容<textarea id="cA" rows="2" placeholder="您的回覆，或需要回電處理的事項"></textarea></label>
+        <div class="wide call-actions"><label class="check"><input type="checkbox" id="cPend"> 需要回電（標為「待回電」）</label>
+          <button class="btn btn-primary" style="width:auto" type="submit">儲存來電紀錄</button></div>
+      </form></section>
+    <section class="kpis">
+      <div class="kpi"><b class="num">${tCount}</b><span>今日來電</span></div>
+      <div class="kpi" style="--tone:var(--secondary)"><b class="num">${(data || []).length}</b><span>${{ today: '今日', week: '近 7 天', month: '本月', all: '全部' }[f.range]}來電</span></div>
+      <div class="kpi" style="--tone:var(--warning)"><b class="num">${(pend || []).length}</b><span>待回電</span></div>
+    </section>
+    ${(pend || []).length ? `<section class="card attention-card"><h3>待回電（${pend.length}）</h3><ul class="lk-list">
+      ${pend.map(c => `<li><span class="lk-date">${when(c.called_at)}</span><span class="lk-title"><b>${esc(c.caller?.name || '')}</b> ${esc(c.emp_id)}｜分機 <b>${esc(c.ext)}</b>｜${esc(c.caller?.dept || '')}
+        <small>${esc(c.category || '')}：${esc(c.question || '')}</small></span>
+        <button class="btn btn-ghost" type="button" onclick="callDone(${Number(c.id)})">已回覆</button></li>`).join('')}</ul></section>` : ''}
+    <section class="card"><h3>常見問題（${{ today: '今日', week: '近 7 天', month: '本月', all: '全部' }[f.range]}）</h3>
+      ${Object.entries(catN).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<div class="cs-hbar"><span class="cs-hl">${esc(k)}</span><div class="cs-ht"><i style="width:${v / maxC * 100}%;background:var(--secondary)"></i></div><span class="num">${v}</span></div>`).join('') || '<div class="empty">尚無來電紀錄</div>'}
+      <p class="hint">常被問的問題可以考慮公告或放進「免登入查詢」頁的說明，減少來電。</p></section>
+    <section class="card"><h3>來電紀錄（${rows.length} 筆）</h3>
+      <div class="filters" style="align-items:center">
+        <div class="seg">${[['today', '今日'], ['week', '近 7 天'], ['month', '本月'], ['all', '全部']].map(([v, t]) => `<button type="button" class="${f.range === v ? 'is-active' : ''}" onclick="state.callF.range='${v}';renderCalls()">${t}</button>`).join('')}</div>
+        <select id="cfCat" style="width:auto"><option value="">所有類別</option>${CALL_CATS.map(c => `<option ${f.cat === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
+        <select id="cfSt" style="width:auto"><option value="">所有狀態</option><option ${f.status === '已回覆' ? 'selected' : ''}>已回覆</option><option ${f.status === '待回電' ? 'selected' : ''}>待回電</option></select>
+        <input id="cfQ" type="search" placeholder="員工編號、姓名或問題" value="${esc(f.q)}" style="flex:1;min-width:160px">
+        <button class="btn btn-ghost" type="button" id="cfCsv">下載 CSV</button></div>
+      <div class="table-wrap"><table><thead><tr><th>時間</th><th>來電者</th><th>分機</th><th>類別</th><th>問題／回覆</th><th>狀態</th><th>接聽</th></tr></thead><tbody>
+      ${rows.slice(0, 300).map(c => `<tr><td>${when(c.called_at)}</td>
+        <td><button class="btn-link" type="button" onclick="go('person','${esc(c.emp_id)}')">${esc(c.caller?.name || c.emp_id)}</button><br><small>${esc(c.emp_id)}｜${esc(c.caller?.dept || '')}</small></td>
+        <td class="num">${esc(c.ext)}</td><td>${esc(c.category || '')}</td>
+        <td class="reason">${esc(c.question || '')}${c.answer ? `<br><small>回覆：${esc(c.answer)}</small>` : ''}</td>
+        <td>${c.status === '待回電' ? `<span class="pill expiring">待回電</span><br><button class="btn-link" type="button" onclick="callDone(${Number(c.id)})">標為已回覆</button>` : '<span class="pill valid">已回覆</span>'}</td>
+        <td>${esc(c.handler?.name || c.handled_by || '')}</td></tr>`).join('') || '<tr><td colspan="7" class="empty">沒有符合的紀錄</td></tr>'}</tbody></table></div></section>`;
+
+  // 輸入員工編號 → 顯示來電者資料（姓名、單位、認證狀態、過去來電）
+  let timer;
+  $('cEmp').oninput = () => { clearTimeout(timer); timer = setTimeout(showCaller, 350); };
+  async function showCaller() {
+    const q = $('cEmp').value.trim().replace(/[%_\\,()]/g, '');
+    if (q.length < 3) { $('cWho').innerHTML = '<span class="hint">輸入員工編號後，這裡會顯示姓名、單位、認證狀態與過去來電。</span>'; return; }
+    const [{ data: st }, { data: past }] = await Promise.all([
+      sb.from('cert_status').select('emp_id,dept,status,status_code,ve:detail->activeCertificate->>valid_end_roc,teach:detail->>teachingHours,need:detail->>requiredTotalHours,staff(name,title)').ilike('emp_id', q).limit(1),
+      sb.from('call_logs').select('called_at,category,question,status').ilike('emp_id', q).order('called_at', { ascending: false }).limit(5)
+    ]);
+    const s = st && st[0];
+    if (!s) { $('cWho').innerHTML = `<span class="warn-text">查無員工編號「${esc(q)}」，請再確認。</span>`; return; }
+    $('cWho').innerHTML = `<div class="call-card tone-${esc(s.status_code)}"><b>${esc(s.staff?.name || '')}</b> ${esc(s.emp_id)}｜${esc(s.dept)}｜${esc(s.staff?.title || '')}
+      <div>${esc(s.status)}${s.ve ? `｜效期至 ${esc(s.ve)}` : ''}｜點數 ${esc(s.teach)} / ${esc(s.need)}</div>
+      <button class="btn-link" type="button" onclick="go('person','${esc(s.emp_id)}')">開啟完整個人頁 →</button>
+      ${(past || []).length ? `<div class="hint" style="margin:4px 0 0">過去來電 ${past.length} 次：${past.map(p => `${new Date(p.called_at).toLocaleDateString('zh-TW')} ${esc(p.category || '')}${p.status === '待回電' ? '（待回電）' : ''}`).join('；')}</div>` : ''}</div>`;
+  }
+  $('callForm').onsubmit = async e => {
+    e.preventDefault();
+    const cat = (document.querySelector('input[name=cCat]:checked') || {}).value || '';
+    const d = await act('call.log', { ext: $('cExt').value, emp_id: $('cEmp').value, category: cat, question: $('cQ').value, answer: $('cA').value, status: $('cPend').checked ? '待回電' : '已回覆' });
+    if (d) renderCalls();
+  };
+  $('cfCat').onchange = e => { f.cat = e.target.value; renderCalls(); };
+  $('cfSt').onchange = e => { f.status = e.target.value; renderCalls(); };
+  $('cfQ').onchange = e => { f.q = e.target.value; renderCalls(); };
+  $('cfCsv').onclick = () => download(`來電紀錄_${today()}.csv`, [['時間', '員工編號', '姓名', '單位', '分機', '類別', '問題', '回覆', '狀態', '接聽'],
+    ...rows.map(c => [fmtTime(c.called_at), c.emp_id, c.caller?.name || '', c.caller?.dept || '', c.ext, c.category || '', c.question || '', c.answer || '', c.status, c.handler?.name || c.handled_by || ''])]);
+  setTimeout(() => $('cExt').focus(), 0);
+}
+async function callDone(id) { const d = await act('call.update', { id, status: '已回覆' }); if (d) renderCalls(); }
+
 // ---------- 課程辦理狀況：一般醫學、教學能力提升課程的課程數、通過人次、開課單位、形式、參與者職類 ----------
 // 資料：每次同步由本機彙總的課程層級統計（settings.course_stats），不含個人資料
 const CAT_NAME = { general: '一般醫學', teaching: '教學能力提升' };
@@ -1286,7 +1378,7 @@ async function renderList() {
   const list = await loadList();
   state.viewList = list; state.viewRef = undefined;
   const count = c => list.filter(r => r.status_code === c).length;
-  const kpis = isAdmin() ? '' : `
+  const kpis = isCfd() ? '' : `
     <section class="kpis">
       <button type="button" class="kpi" onclick="pickStatus('')"><b class="num">${list.length}</b><span>所屬人員</span></button>
       <button type="button" class="kpi" style="--tone:var(--success)" onclick="pickStatus('valid')"><b class="num">${count('valid')}</b><span>認證有效／年度達標</span></button>
@@ -1876,7 +1968,7 @@ async function renderAdmin() {
     <section class="card"><h3>授權角色</h3>
       <form id="roleForm" class="inline-form">
         <label>員工編號<input id="gEmp" required></label>
-        <label>角色<select id="gRole"><option value="general">一般人員</option><option value="dept_coordinator">科部主管</option><option value="admin">師培中心管理者</option><option value="super_admin">最高管理者</option></select></label>
+        <label>角色<select id="gRole"><option value="general">一般人員</option><option value="dept_coordinator">科部主管</option><option value="cfd_staff">師培中心承辦人員（查詢、來電紀錄）</option><option value="admin">師培中心管理者</option><option value="super_admin">最高管理者</option></select></label>
         <label>科部主管的授權範圍（單位名稱開頭；留空＝本人所屬單位）<input id="gScope"></label>
         <label>或：職類別管理人（依執登職類；選了就不看單位名稱，由本人勾選監測單位）<select id="gProf"><option value="">（不使用）</option>
           ${['護理', '藥師', '檢驗', '放射師(放射診斷、放射腫瘤、核子醫學)', '物理治療', '職能治療', '呼吸治療', '營養', '臨床心理', '語言治療', '聽力', '助產', '醫師'].map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join('')}</select></label>

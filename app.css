@@ -119,6 +119,25 @@ form input { display: block; width: 100%; margin-top: 4px; padding: 10px 12px; b
 
 details.tutor-list > summary { cursor: pointer; font-weight: 700; margin: 10px 0 4px; }
 
+/* 來電紀錄 */
+.call-form { border-top: 5px solid var(--secondary); }
+.call-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px; }
+.call-grid .wide, .call-grid .call-who, .call-grid .call-cats { grid-column: 1 / -1; }
+.call-grid textarea { width: 100%; border: 1.5px solid var(--line); border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 14px; }
+.req { color: #b3261e; font-size: 12px; }
+.call-who { min-height: 44px; margin-bottom: 8px; }
+.call-card { border-left: 6px solid var(--tone, var(--mist)); background: var(--bg); border-radius: 8px; padding: 8px 12px; font-size: 14px; }
+.call-card b { font-size: 16px; color: var(--primary-dark); }
+.warn-text { color: #b3261e; font-weight: 700; font-size: 14px; }
+.call-cats { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 10px; }
+.call-cats .lbl { font-size: 13px; font-weight: 700; margin-right: 4px; }
+.chip-r { margin: 0; font-weight: 400; } .chip-r input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.chip-r span { display: inline-block; border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; font-size: 13.5px; cursor: pointer; }
+.chip-r input:checked + span { background: var(--primary); color: #fff; border-color: var(--primary); }
+.chip-r input:focus-visible + span { outline: 3px solid var(--warning); outline-offset: 1px; }
+.call-actions { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+@media (max-width: 560px) { .call-grid { grid-template-columns: 1fr; } }
+
 /* 課程辦理狀況 */
 :root { --cs-g: #2575A1; --cs-t: #48B6A2; }
 .seg { display: inline-flex; background: var(--bg); border-radius: 8px; padding: 3px; gap: 2px; }
