@@ -40,6 +40,17 @@ async function api(action, payload = {}) {
   if (!data.success) throw new Error(data.message || '操作失敗');
   return data;
 }
+// 使用紀錄：登入、查看個人頁、員工編號查詢（背景送出、不影響畫面；同一對象 5 分鐘內只記一次）
+const _logged = new Map();
+function logView(kind, target = '') {
+  const key = `${kind}|${String(target).toLowerCase()}`, now = Date.now();
+  if (_logged.has(key) && now - _logged.get(key) < 5 * 60e3) return;
+  if (kind === 'login') {
+    try { if (sessionStorage.getItem('cfdLoginLogged') === (state.me && state.me.emp_id)) return; sessionStorage.setItem('cfdLoginLogged', state.me.emp_id); } catch (e) { /* 無法使用時照常記錄 */ }
+  }
+  _logged.set(key, now);
+  api('log.view', { kind, target }).catch(() => {});
+}
 async function act(action, payload, after) {
   try { const d = await api(action, payload); toast(d.message); if (after) await after(d); return d; }
   catch (err) { toast(err.message, false); }
@@ -263,6 +274,7 @@ if ($('empSearch')) $('empSearch').onsubmit = async e => {
   if (error) return toast('查詢失敗：' + error.message, false);
   if (!data || !data.length) return toast(`查無員工編號 ${q}${state.role === 'dept_coordinator' ? '，或此人不在您的科部範圍' : ''}。`, false);
   $('empQ').value = ''; $('empQ').blur();
+  logView('search', data[0].emp_id);
   go('person', data[0].emp_id);
 };
 $('logoutBtn').onclick = async () => { await sb.auth.signOut(); state.me = null; state.roster = null; $('content').innerHTML = ''; showAuth(); };
@@ -445,7 +457,9 @@ async function boot() {
   if (isAdmin()) views.push(['review', '審查'], ['calls', '來電紀錄']);
   if (isAdmin() || state.role === 'dept_coordinator') views.push(['plan', '訓練計畫'], ['coursestats', '課程辦理'], ['roster', '追蹤名單'], ['ratio', '師生比']);
   if (state.role === 'cfd_staff') views.push(['coursestats', '課程辦理'], ['ratio', '師生比']);
+  if (isAdmin()) views.push(['logs', '使用紀錄']);
   if (state.role === 'super_admin') views.push(['admin', '管理']);
+  logView('login');
   $('nav').innerHTML = views.map(([v, t]) => `<button type="button" data-view="${v}">${t}</button>`).join('');
   if ($('empSearch')) $('empSearch').hidden = !(isCfd() || state.role === 'dept_coordinator');
   $('nav').querySelectorAll('button').forEach(b => { b.onclick = () => go(b.dataset.view); });
@@ -468,7 +482,7 @@ function go(view, arg) {
   $('nav').querySelectorAll('button').forEach(b => b.classList.toggle('is-active', b.dataset.view === view));
   $('content').innerHTML = '<div class="card empty">載入中…</div>';
   const run = { mine: () => renderPerson(state.me.emp_id), person: () => renderPerson(arg, true), dept: renderList, all: renderOverview,
-    courses: renderCourses, rules: renderRules, ratio: renderRatio, coursestats: renderCourseStats, calls: renderCalls, plan: () => { state.planId = arg || null; return renderPlanPage(); }, review: renderReview, roster: renderRoster, admin: renderAdmin, expiry: renderExpiry }[view];
+    courses: renderCourses, rules: renderRules, ratio: renderRatio, coursestats: renderCourseStats, calls: renderCalls, logs: renderLogs, plan: () => { state.planId = arg || null; return renderPlanPage(); }, review: renderReview, roster: renderRoster, admin: renderAdmin, expiry: renderExpiry }[view];
   // 連續快速切換頁面時，較早的頁面可能較晚才載完而蓋掉畫面：發現過期就重畫目前頁面
   const token = state.nav = (state.nav || 0) + 1;
   state.arg = arg;
@@ -731,6 +745,7 @@ async function renderPerson(empId, back) {
   if (error) throw error;
   if (!row) { $('content').innerHTML = '<div class="card empty">尚無此人員的認證資料。</div>'; return; }
   if (staff && staff.name) rememberNames([{ emp_id: empId, name: staff.name }]);
+  logView('person', empId);
   $('asOf').textContent = fmtTime(row.computed_at);
   $('content').innerHTML = personHTML({ empId, back, own, row, staff, records, apps, upcoming, myRegs,
     regime: state.regime, role: state.role, admin: isAdmin(), canAct: own || isAdmin() || state.role === 'dept_coordinator' });
@@ -996,6 +1011,72 @@ async function renderRatio() {
       <div class="note">師生比以「有效認證教師」計算。醫策會教師認證資料只列現職人員，名單上已離職的教師無法回溯查證，仍計入教師、另行標示。資料來源：${esc(M.file)}；教師認證比對：${esc(M.pecFile || '')}。</div></section>
     ${trend}`;
   $('rMonth').onchange = e => { state.ratioMonth = e.target.value; renderRatio(); };
+}
+
+// ---------- 使用紀錄（管理者）：誰在什麼時候登入、查看了誰、免登入查詢、資料異動 ----------
+const LOG_TYPES = { login: ['登入系統'], person: ['查看個人頁'], search: ['員工編號查詢'], lookup: ['免登入查詢'] };
+async function renderLogs() {
+  const f = state.logF = state.logF || { range: 'week', type: '', q: '' };
+  const days = { today: 0, week: 6, month: 29, quarter: 89 }[f.range];
+  const since = new Date(Date.now() + 8 * 3600e3 - days * 864e5).toISOString().slice(0, 10);
+  let q = sb.from('audit_logs').select('id,at,actor,action,target,detail').gte('at', `${since}T00:00:00+08:00`).order('at', { ascending: false });
+  if (f.type && LOG_TYPES[f.type]) q = q.in('action', LOG_TYPES[f.type]);
+  else if (f.type === 'change') q = q.not('action', 'in', `(${Object.values(LOG_TYPES).flat().join(',')})`);
+  const { data, error } = await q.limit(3000);
+  if (error) throw error;
+  let logs = data || [];
+  // 姓名：使用者與對象
+  const ids = [...new Set(logs.flatMap(l => [l.actor, l.target]).filter(x => x && /^[A-Za-z0-9_]{2,20}$/.test(x)))];
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data: s } = await sb.from('staff').select('emp_id,name,dept').in('emp_id', ids.slice(i, i + 200));
+    rememberNames(s || []); (s || []).forEach(x => { state.deptOf = state.deptOf || new Map(); state.deptOf.set(x.emp_id.toLowerCase(), x.dept); });
+  }
+  const nm = e => nameOf(e) || '';
+  const kw = f.q.trim().toLowerCase();
+  if (kw) logs = logs.filter(l => [l.actor, l.target, nm(l.actor), nm(l.target)].some(v => String(v || '').toLowerCase().includes(kw)));
+  const isType = (l, t) => LOG_TYPES[t].includes(l.action);
+  const cnt = t => logs.filter(l => isType(l, t)).length;
+  const users = new Set(logs.filter(l => isType(l, 'login')).map(l => l.actor)).size;
+  // 每日趨勢（登入、免登入查詢、查看個人頁）
+  const dayKeys = Array.from({ length: days + 1 }, (_, i) => new Date(Date.now() + 8 * 3600e3 - (days - i) * 864e5).toISOString().slice(0, 10));
+  const dayOf = l => new Date(new Date(l.at).getTime() + 8 * 3600e3).toISOString().slice(0, 10);
+  const series = ['login', 'lookup', 'person'].map(t => dayKeys.map(d => logs.filter(l => isType(l, t) && dayOf(l) === d).length));
+  const maxD = Math.max(1, ...series.flat());
+  const trend = days >= 6 ? `<div class="cs-chart log-chart" style="grid-template-columns:repeat(${dayKeys.length},1fr)">${dayKeys.map((d, i) => `<div class="cs-col">
+      <div class="cs-bars">${series.map((s, k) => `<i class="lg${k}" style="height:${s[i] / maxD * 100}%" title="${d}｜${['登入', '免登入查詢', '查看個人頁'][k]} ${s[i]}"></i>`).join('')}</div>
+      <span class="cs-m">${dayKeys.length <= 14 || i % 5 === 0 ? `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}` : ''}</span></div>`).join('')}</div>
+    <div class="legend"><span><i class="lg0"></i>登入</span><span><i class="lg1"></i>免登入查詢</span><span><i class="lg2"></i>查看個人頁</span></div>` : '';
+  // 最常使用的人（登入＋查看＋查詢）
+  const top = {}; logs.filter(l => !isType(l, 'lookup')).forEach(l => { top[l.actor] = (top[l.actor] || 0) + 1; });
+  const topList = Object.entries(top).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  const label = e => `${esc(nm(e) || '')} <small>${esc(e || '')}</small>`;
+  $('content').innerHTML = `
+    <section class="card"><h3>使用紀錄</h3>
+      <div class="filters" style="align-items:center">
+        <div class="seg">${[['today', '今日'], ['week', '近 7 天'], ['month', '近 30 天'], ['quarter', '近 90 天']].map(([v, t]) => `<button type="button" class="${f.range === v ? 'is-active' : ''}" onclick="state.logF.range='${v}';renderLogs()">${t}</button>`).join('')}</div>
+        <select id="lgType" style="width:auto"><option value="">所有類型</option>${[['login', '登入系統'], ['person', '查看個人頁'], ['search', '員工編號查詢'], ['lookup', '免登入查詢'], ['change', '資料異動（審查、授權、上傳…）']].map(([v, t]) => `<option value="${v}" ${f.type === v ? 'selected' : ''}>${t}</option>`).join('')}</select>
+        <input id="lgQ" type="search" placeholder="使用者或對象的員工編號、姓名" value="${esc(f.q)}" style="flex:1;min-width:180px">
+        <button class="btn btn-ghost" type="button" id="lgCsv">下載 CSV</button></div>
+      <p class="hint">只有師培中心管理者看得到這一頁。同一人 5 分鐘內重複查看同一頁只記一次；免登入查詢的「使用者」即被查詢的本人。</p></section>
+    <section class="kpis">
+      <div class="kpi"><b class="num">${cnt('login')}</b><span>登入次數</span></div>
+      <div class="kpi" style="--tone:var(--secondary)"><b class="num">${users}</b><span>不重複登入者</span></div>
+      <div class="kpi" style="--tone:var(--success)"><b class="num">${cnt('lookup')}</b><span>免登入查詢</span></div>
+      <div class="kpi" style="--tone:var(--warning)"><b class="num">${cnt('person') + cnt('search')}</b><span>查看個人頁／編號查詢</span></div>
+    </section>
+    ${trend ? `<section class="card"><h3>每日使用</h3>${trend}</section>` : ''}
+    <section class="card"><h3>使用最多的帳號（登入、查看、查詢）</h3>
+      ${topList.map(([e, v]) => `<div class="cs-hbar"><span class="cs-hl">${label(e)}</span><div class="cs-ht"><i style="width:${v / topList[0][1] * 100}%;background:var(--secondary)"></i></div><span class="num">${v}</span></div>`).join('') || '<div class="empty">無資料</div>'}</section>
+    <section class="card"><h3>明細（${logs.length} 筆${logs.length >= 3000 ? '，僅顯示最近 3000 筆' : ''}）</h3>
+      <div class="table-wrap"><table><thead><tr><th>時間</th><th>使用者</th><th>動作</th><th>對象</th><th>說明</th></tr></thead><tbody>
+      ${logs.slice(0, 500).map(l => `<tr><td>${esc(fmtTime(l.at))}</td><td>${label(l.actor)}</td><td><span class="pill ${isType(l, 'lookup') ? 'valid' : isType(l, 'login') ? 'eligible' : isType(l, 'person') || isType(l, 'search') ? '' : 'expiring'}">${esc(l.action)}</span></td>
+        <td>${l.target && l.target !== l.actor ? `<button class="btn-link" type="button" onclick="go('person','${esc(l.target)}')">${label(l.target)}</button>` : (l.target === l.actor && !isType(l, 'login') ? '本人' : '')}</td>
+        <td class="reason">${esc(ROLE_LABEL[l.detail] || l.detail || '')}</td></tr>`).join('') || '<tr><td colspan="5" class="empty">沒有符合的紀錄</td></tr>'}</tbody></table></div>
+      ${logs.length > 500 ? '<p class="hint">畫面顯示最近 500 筆，完整明細請下載 CSV。</p>' : ''}</section>`;
+  $('lgType').onchange = e => { f.type = e.target.value; renderLogs(); };
+  $('lgQ').onchange = e => { f.q = e.target.value; renderLogs(); };
+  $('lgCsv').onclick = () => download(`使用紀錄_${today()}.csv`, [['時間', '使用者員工編號', '使用者姓名', '動作', '對象員工編號', '對象姓名', '說明'],
+    ...logs.map(l => [fmtTime(l.at), l.actor, nm(l.actor), l.action, l.target || '', nm(l.target), ROLE_LABEL[l.detail] || l.detail || ''])]);
 }
 
 // ---------- 來電紀錄：師培中心承辦人員接聽同仁詢問時記錄（分機、員工編號必填），並可立即查看來電者進度 ----------

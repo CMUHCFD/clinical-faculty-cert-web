@@ -119,6 +119,11 @@ form input { display: block; width: 100%; margin-top: 4px; padding: 10px 12px; b
 
 details.tutor-list > summary { cursor: pointer; font-weight: 700; margin: 10px 0 4px; }
 
+/* 使用紀錄 */
+.log-chart { height: 160px; gap: 2px; } .log-chart .cs-bars i { width: 30%; }
+.lg0 { background: var(--primary) !important; } .lg1 { background: var(--success) !important; } .lg2 { background: var(--warning) !important; }
+.legend i.lg0, .legend i.lg1, .legend i.lg2 { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
+
 /* 來電紀錄 */
 .call-form { border-top: 5px solid var(--secondary); }
 .call-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px; }
