@@ -904,6 +904,25 @@ async function renderPerson(empId, back) {
   if ($('trfForm')) $('trfForm').onsubmit = e => { e.preventDefault(); submitTransfer(empId, () => { state.list = null; renderPerson(empId, back); }); };
 }
 
+// 教學醫院年資採認（管理者）：人事資料離職再到職、留職停薪後只顯示最新到職日，系統算出的年資可能偏低
+function seniorityForm(d, empId) {
+  const s = d.senioritySource || {};
+  const cur = s.override ? `目前採認 ${s.override} 年` : d.seniorityDeemed ? '曾認證，已視為符合' : `系統計算 ${s.computed ?? d.seniority} 年`;
+  return `<details class="apply"><summary class="btn btn-ghost" style="width:auto">教學醫院年資（${esc(cur)}）</summary>
+    <div class="inline-form">
+      <p class="hint">系統依人事資料的執業登記起始日計算${s.from ? `（${esc(s.from.slice(0, 7).replace('-', '/'))} 起，${esc(s.computed ?? '')} 年）` : ''}。離職再到職或留職停薪者只顯示最新日期，年資可能偏低。
+        <b>曾取得臨床教師認證者已自動視為符合，不必登錄。</b>查證後可在此登錄實際的教學醫院年資（可含他院），系統取較大者。</p>
+      <label>教學醫院年資（年）<input id="senY" type="number" step="0.1" min="0" max="60" value="${esc(s.override || '')}"></label>
+      <label>依據（例如：再到職前任職 101/3–106/8、○○醫院 2 年）<input id="senN" maxlength="100" value="${esc(s.note || '')}"></label>
+      <button class="btn btn-primary" style="width:auto" type="button" onclick="setSeniority('${esc(empId)}', false)">採認並重新計算</button>
+      ${s.override ? `<button class="btn btn-ghost" style="width:auto" type="button" onclick="setSeniority('${esc(empId)}', true)">取消採認</button>` : ''}
+    </div></details>`;
+}
+function setSeniority(empId, remove, years, note) {
+  act('admin.seniority', { emp_id: empId, years: remove ? null : (years ?? $('senY').value), note: remove ? '' : (note ?? $('senN').value), remove },
+    () => { state.list = null; return state.view === 'review' ? renderReview() : renderPerson(empId, state.view === 'person'); });
+}
+
 // 個人頁內容：登入後的「我的認證／人員頁」與免登入的「進度查詢」共用（o.lookup = 免登入、唯讀）
 function personHTML(o) {
   const { empId, back, own, row, staff, records, apps, upcoming, myRegs, canAct } = o;
@@ -934,6 +953,7 @@ function personHTML(o) {
         </form></details>` : ''}
       ${pending ? '<div class="note">已有一筆審核中的申請。</div>' : ''}
       ${pecEx(empId) ? `<div class="attention">醫策會不受理本院提報：${esc(pecEx(empId).reason)}（${esc(pecEx(empId).at)} 標記）。${own ? '如資料有誤，請洽師培中心。' : ''}</div>` : ''}
+      ${o.admin && certTrack ? seniorityForm(d, empId) : ''}
       ${o.admin && certTrack ? (pecEx(empId)
         ? `<button class="btn btn-ghost" type="button" onclick="togglePec('${esc(empId)}', true)">取消標記，恢復列入醫策會提報</button>`
         : `<details class="apply"><summary class="btn btn-ghost" style="width:auto">標記為醫策會不受理（不列入提報）</summary>
@@ -2380,7 +2400,8 @@ async function renderReview() {
         ${a.attachment_path ? `<br><button class="btn btn-ghost" type="button" style="margin-top:6px" onclick="viewCert('${esc(a.attachment_path)}')">查看證書</button>` : a.status !== '審核中' ? '<br><small>證書檔已於審查後刪除</small>' : ''}`
       : `<span class="pill ${a.auto_check?.eligible ? 'valid' : 'expired'}">系統檢核${a.auto_check?.eligible ? '符合' : '未符合'}</span>
       ${esc(a.auto_check?.reason || '')}<br>教學 ${esc(a.auto_check?.teaching)}・基礎 ${esc(a.auto_check?.basic)}・進階 ${esc(a.auto_check?.advanced)}（${esc(a.auto_check?.window || '')}）
-      ${a.external_hours ? `<br>院外時數：${esc(a.external_hours)}` : ''}`}${a.memo ? `<br>備註：${esc(a.memo)}` : ''}</td>
+      ${a.external_hours ? `<br>院外時數：${esc(a.external_hours)}` : ''}
+      ${Number(a.service_years) > 0 ? `<br>申報教學醫院年資：<b>${esc(a.service_years)}</b> 年${a.status === '審核中' ? ` <button class="btn-link" type="button" title="人事資料再到職或留停者年資會偏低；查證後可採認申報年資" onclick="setSeniority('${esc(a.emp_id)}', false, '${esc(a.service_years)}', '依認證申請表申報')">採認此年資</button>` : ''}` : ''}`}${a.memo ? `<br>備註：${esc(a.memo)}` : ''}</td>
     <td>${a.status === '審核中' ? `${periodInputs(a)}<input id="cm-${esc(a.id)}" placeholder="審查意見（選填）" style="width:150px"><br>
         <button class="btn btn-primary" style="width:auto;padding:6px 12px" type="button" onclick="review('${esc(a.id)}',true)">核准</button>
         <button class="btn btn-ghost" type="button" onclick="review('${esc(a.id)}',false)">退回</button>`
