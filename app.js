@@ -11,7 +11,7 @@ const state = { me: null, role: 'general', view: null, list: null, regime: 'lega
 const ROLE_LABEL = { general: '一般人員', dept_coordinator: '科部主管', cfd_staff: '師培中心承辦人員', admin: '師培中心管理者', super_admin: '最高管理者' };
 // 師培中心人員（管理者＋承辦人員）：可查詢全院、記錄來電；審查、授權等仍只限管理者（isAdmin）
 const isCfd = () => isAdmin() || state.role === 'cfd_staff';
-const STATE_LABEL = { met: '已達標', in_progress: '進行中', missed: '未達標（暫停資格）', made_up: '已補足', future: '尚未開始', exempt: '不檢核', window: '採計期間' };
+const STATE_LABEL = { met: '已達標', in_progress: '進行中', missed: '未達標（暫停資格）', made_up: '已補足', future: '尚未開始', exempt: '不另計（生效當年度或過渡）', window: '採計期間', counsel: '未達標（輔導年，不暫停）' };
 const BASIC = ['課程設計', '教學技巧', '評估技巧', '教材製作'];
 const ADVANCED = ['跨領域團隊合作照護教學', '全人照護教學', '溝通及輔導', '創新教學導入', '教師教學經驗分享'];
 const isAdmin = () => state.role === 'admin' || state.role === 'super_admin';
@@ -128,7 +128,7 @@ function lookupHTML(r) {
     const end = new Date(cert.valid_end), now = new Date(today());
     const months = (end.getFullYear() - now.getFullYear()) * 12 + end.getMonth() - now.getMonth();
     validity = `<div class="lk-big">${esc(cert.valid_start_roc)}<span class="lk-to">至</span>${esc(cert.valid_end_roc)}</div>
-      <div class="lk-sub">${months < 0 ? '已屆滿' : months <= 6 ? `<b class="warn">剩 ${months} 個月到期</b>` : `還有 ${months} 個月`}</div>`;
+      <div class="lk-sub">${months < 0 ? '已屆滿' : months <= 6 ? `<b class="warn">剩 ${months} 個月到期</b>` : `還有 ${months} 個月`}${cert.extended_from ? `<br><small>原至 ${esc(cert.extended_from_roc)}，依過渡規定延至年底</small>` : ''}</div>`;
   } else if (certTrack) {
     validity = `<div class="lk-big muted">尚未取得</div><div class="lk-sub">${d.lastCertificate ? `上一張效期至 ${esc(d.lastCertificate.valid_end_roc || d.lastCertificate.valid_end)}` : '目前沒有有效的臨床教師認證'}</div>`;
   }
@@ -781,12 +781,13 @@ function journeyCard(d) {
     }
     const near = !after && left >= 0 && left <= 183;
     const caption = after ? `已於 ${roc(end)} 屆滿` : left < 0 ? '已屆滿' : certTrack ? `距到期還有 <b>${months >= 1 ? `${months} 個月` : `${left} 天`}</b>` : `今年度還剩 <b>${left} 天</b>`;
+    const extLine = cert && cert.extended_from ? `<p class="tl-ext">原效期至 ${esc(cert.extended_from_roc)}，依過渡規定<b>延至 ${roc(end)}</b>（效期總長不超過四年），年底統一辦理展延。</p>` : '';
     timeline = `<div class="tl" role="img" aria-label="${esc(title)}：${roc(start)} 至 ${roc(end)}，今天 ${roc(now)}">
         <div class="tl-track">${segs.join('')}</div>
         <div class="tl-me ${near || after ? 'warn' : ''}" style="left:${me}%">${WALKER}<small>今天</small></div>
         <div class="tl-end" style="left:100%">${FLAG}</div></div>
       <div class="tl-ends"><span>${roc(start)}<small>${certTrack ? '效期起' : '1 月 1 日'}</small></span><span class="tl-cap ${near || after ? 'warn' : ''}">${caption}</span><span>${roc(end)}<small>${certTrack ? '效期迄' : '12 月 31 日'}</small></span></div>
-      ${segs.length > 1 ? `<div class="legend tl-legend"><span><i class="s-met"></i>已達標</span><span><i class="s-in_progress"></i>今年進行中</span><span><i class="s-missed"></i>未達標</span><span><i class="s-future"></i>尚未開始</span></div>` : ''}`;
+      ${segs.length > 1 ? `<div class="legend tl-legend"><span><i class="s-met"></i>已達標</span><span><i class="s-in_progress"></i>今年進行中</span><span><i class="s-missed"></i>未達標</span><span><i class="s-counsel"></i>輔導年未達標</span><span><i class="s-future"></i>尚未開始</span></div>` : ''}${extLine}`;
   }
   // 點數小路：人像依目前點數前進，旗子是本次要達到的點數
   const have = Number(certTrack ? d.teachingHours : d.totalHours) || 0, need = Number(d.requiredTotalHours) || 0;
@@ -918,7 +919,7 @@ function personHTML(o) {
       ${certTrack ? `<span class="tag ${d.regime === 'legacy' ? 'legacy' : ''}">目前適用：${esc(d.regimeLabel)}</span>` : ''}${d.transferredFrom ? ` <span class="tag transfer-tag">他院轉任：${esc(d.transferredFrom)}</span>` : ''}
       <div class="status">${esc(d.status)}</div>
       <div class="rule">${esc(d.trackLabel)}</div>
-      <div class="rule">員工編號 ${o.lookup ? `${esc(empId)} <span class="nm">${esc(o.name || '')}</span>` : empLabel(empId)}｜${esc(staff?.dept || '')}｜${esc(staff?.title || '')}｜${esc(staff?.profession || '')}${cert ? `｜認證效期 ${esc(cert.valid_start_roc)}–${esc(cert.valid_end_roc)}` : ''}</div>
+      <div class="rule">員工編號 ${o.lookup ? `${esc(empId)} <span class="nm">${esc(o.name || '')}</span>` : empLabel(empId)}｜${esc(staff?.dept || '')}｜${esc(staff?.title || '')}｜${esc(staff?.profession || '')}${cert ? `｜認證效期 ${esc(cert.valid_start_roc)}–${esc(cert.valid_end_roc)}${cert.extended_from ? `（原至 ${esc(cert.extended_from_roc)}，依過渡規定延至年底）` : ''}` : ''}</div>
       <div class="reason">${esc(d.statusReason)}</div>
       ${(d.recommendations || []).length ? `<ul class="recs">${d.recommendations.map(r => `<li>${esc(r)}</li>`).join('')}</ul>` : ''}
       ${certTrack && canAct && !pending && (o.regime === 'legacy' || o.role !== 'general') ? `<details class="apply"><summary class="btn ${d.initialEligible || d.renewalCompliant ? 'btn-primary' : 'btn-ghost'}" style="width:auto">${
@@ -1112,7 +1113,18 @@ async function renderRules() {
     <li>申請新聘或升等教職：申請前一年度完成至少 4 點；臨床醫師另需申請前 3 年內完成教學能力提升 10 點以上。</li></ul>
     <div class="note">依據：臨床教學師資培育暨獎勵辦法（ED-026）第二條、第四條。本頁內容由系統規則設定產生，與計算結果使用同一份規則。</div></section>`;
 
-  $('content').innerHTML = you + doctors + allied + others + common;
+  // 新舊制轉換的過渡規定（使用者 2026-10-13 決定，rules.transition）
+  const T = R.transition || {};
+  const rocY = y => Number(y) - 1911;
+  const trans = !T.new_rule_cert_start ? '' : `<section class="card"><h3>新舊制轉換的過渡規定（醫事人員）</h3>
+    <ol class="recs">
+      <li><b>效期一律到 12/31：</b>${(T.extend_to_year_end_years || []).map(rocY).join('、')} 年在年中到期的證書，效期延至到期當年 12/31（效期總長不超過四年，依醫策會作業程序「至多四年」），年底統一辦理展延，新證自次年 1/1 起四年。</li>
+      <li><b>舊證照舊規定：</b>效期起日在 ${rocY(T.new_rule_cert_start.slice(0, 4))}/${Number(T.new_rule_cert_start.slice(5, 7))}/${Number(T.new_rule_cert_start.slice(8, 10))} 之前的證書，依原規定展延（效期屆滿前二年內 ${L.renewal_total ?? 8} 點），不追溯每年四小時；換發新證後才適用每年四小時。</li>
+      <li><b>年中認證：</b>經科部每季提報者，自下一季的第一天（1/1、4/1、7/1、10/1）生效，效期至生效年度起算第四年度 12/31。效期不是從 1/1 開始的，生效當年度不另計年度時數。</li>
+      ${(T.counseling_years || []).length ? `<li><b>輔導年（試行）：</b>${T.counseling_years.map(rocY).join('、')} 年未完成每年四小時者，只提醒、不暫停資格；之後的年度未完成，次年 1/1 起暫停資格，補滿後次月恢復。</li>` : ''}
+    </ol>
+    <div class="note">範例：效期原至 116/5/31 → 延至 116/12/31 → 116 年底展延 → 新證 117/1/1–120/12/31，117 年起每年四小時。</div></section>`;
+  $('content').innerHTML = you + doctors + allied + trans + others + common;
 }
 
 // ---------- 師生比：衛福部臨床醫事人員培訓計畫每月核定人員（核定點數 5000＝PGY 學員、0＝臨床教師），至少 1:3 ----------
@@ -1968,9 +1980,22 @@ function certPeriod(r, ref) {
     const [sy, sm] = ym(idx), [ey, em] = ym(idx + years * 12 - 1);
     start = `${sy}-${pad(sm)}-01`; end = `${ey}-${pad(em)}-${pad(new Date(ey, em, 0).getDate())}`;
   } else {
+    // 新制＋過渡規定：與伺服器 status-runner.nextPeriod 相同（效期一律止於 12/31，總長不超過四年）
     const years = (state.rules.general || {}).cert_validity_years || 4;
-    const sy = (renewing ? Number(r.ve.slice(0, 4)) : Number(t.slice(0, 4))) + 1;
-    start = `${sy}-01-01`; end = `${sy + years - 1}-12-31`;
+    const pad = n => String(n).padStart(2, '0');
+    const prev = r.ve || r.le;   // 新制計算結果中的迄日已套用「延至當年 12/31」
+    if (prev && prev >= t) {
+      const ey = Number(prev.slice(0, 4));
+      if (prev.slice(5) === '12-31') { start = `${ey + 1}-01-01`; end = `${ey + years}-12-31`; }
+      else { const d = new Date(`${prev}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + 1); start = d.toISOString().slice(0, 10); end = `${ey + years - 1}-12-31`; }
+    } else if (prev) {
+      const i = Number(t.slice(0, 4)) * 12 + Number(t.slice(5, 7));
+      start = `${Math.floor(i / 12)}-${pad((i % 12) + 1)}-01`; end = `${Math.floor(i / 12) + years - 1}-12-31`;
+    } else {
+      const cy = Number(t.slice(0, 4));
+      const qs = ((state.rules.transition || {}).quarterly_starts || ['01-01']).map(q => `${cy}-${q}`).filter(d => d > t).sort();
+      start = qs[0] || `${cy + 1}-01-01`; end = `${Number(start.slice(0, 4)) + years - 1}-12-31`;
+    }
   }
   return { start: roc(start), end: roc(end) };
 }

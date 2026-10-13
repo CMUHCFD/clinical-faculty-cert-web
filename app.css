@@ -642,3 +642,7 @@ td input[type=checkbox], th input[type=checkbox] { width: 18px; height: 18px; ma
   .pg-act .btn-link { margin-left: 0; }
 }
 @media print { .pg-act { display: none !important; } }
+/* 過渡規定：輔導年、延長效期 */
+.s-counsel { background: var(--warning); color: #5d4a00 !important; }
+.year.counsel { border-color: var(--warning); }
+.tl-ext { margin: 8px 0 0; font-size: 14px; background: #FFF8DC; border-radius: 8px; padding: 6px 10px; }
