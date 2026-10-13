@@ -646,3 +646,18 @@ td input[type=checkbox], th input[type=checkbox] { width: 18px; height: 18px; ma
 .s-counsel { background: var(--warning); color: #5d4a00 !important; }
 .year.counsel { border-color: var(--warning); }
 .tl-ext { margin: 8px 0 0; font-size: 14px; background: #FFF8DC; border-radius: 8px; padding: 6px 10px; }
+
+/* ---------- 簡單版（一眼看懂）---------- */
+.sv { border-top: 8px solid var(--success); padding: 22px 22px 18px; }
+.sv-ok { border-top-color: var(--success); } .sv-warn { border-top-color: var(--warning); } .sv-bad { border-top-color: var(--crimson); }
+.sv-info { border-top-color: var(--secondary); } .sv-muted { border-top-color: var(--mist); }
+.sv-hi { color: var(--muted); font-size: 16px; margin-bottom: 4px; }
+.sv-big { font-size: 30px; font-weight: 800; line-height: 1.3; color: var(--primary-dark); }
+.sv-ok .sv-big { color: #2c8a78; } .sv-bad .sv-big { color: var(--crimson); } .sv-warn .sv-big { color: #9a6b00; }
+.sv-sub { font-size: 18px; margin: 6px 0 0; }
+.sv-pw { margin-top: 56px; }
+.sv-todo { margin-top: 16px; font-size: 18px; background: var(--bg); border-radius: 12px; padding: 12px 16px; }
+.sv-todo ul { margin: 8px 0 0; padding-left: 22px; } .sv-todo li { margin: 6px 0; font-size: 19px; font-weight: 700; color: var(--primary-dark); }
+.sv-route p { font-size: 17px; margin: 0; }
+.sv-toggle { width: 100%; font-size: 16px; padding: 12px; }
+@media (max-width: 720px) { .sv-big { font-size: 25px; } .sv-todo li { font-size: 17px; } }

@@ -229,7 +229,9 @@ function lookupHTML(r) {
 
   const dn = r.regime === 'new' ? d : r.row.detail_new;
   const grid = certTrack ? newGrid(dn, { big: true, title: r.regime === 'new' ? '新制認證進度' : `${(d.newRulePreview && d.newRulePreview.appliesFrom) || 116} 年起改採新制：進度試算` }) : '';
-  return `<div class="lk">${hero}${roleBar(d)}
+  // 預設「簡單版」：一眼看懂狀態、還差什麼、下一步；完整內容收在「看詳細資料」
+  return `<div class="lk">${simpleView(d, { records: r.records, apps: r.apps, regime: r.regime, lookup: true, name: r.name })}
+    <div class="lk-more" ${simpleMode() ? 'hidden' : ''}>${hero}${roleBar(d)}
     ${block('teacher', d.trackType === 'exempt' ? '' : journeyCard(d) + reqCard(d, { big: true })
       + (certTrack && !d.transferredFrom ? '<section class="card lk-note">由其他教學醫院轉任者：您的他院認證可以採認，視為展延教師。請登入後在「我的認證」上傳原認證證書申請查證。</section>' : '')
       + grid + next + (grid ? '' : preview))}
@@ -238,7 +240,84 @@ function lookupHTML(r) {
     ${block('faculty', facultyCard(d, { big: true }), '新聘／升等')}
     ${block('lecturer', lecturerCard(d), '擔任教學能力提升課程講師')}
     ${block('pref', prefCard(r.records), '依修課紀錄分析')}
-    ${block('records', detail + apps)}</div>`;
+    ${block('records', detail + apps)}</div></div>`;
+}
+
+// ---------- 簡單版（以國中生讀得懂為目標）：一句話狀態 → 還要做什麼 → 走到哪裡 → 我的學習路線 ----------
+// 原則：一張卡一件事；句子短、用「你」；不用「舊制、採計期間、展延」等術語；數字放大；細節收進「看詳細資料」
+const simpleMode = () => { try { return localStorage.getItem('cfdView') !== 'full'; } catch (e) { return true; } };
+function toggleView(btn) {
+  const more = btn.closest('.lk, #content').querySelector('.lk-more');
+  const show = more.hidden;
+  more.hidden = !show;
+  btn.textContent = show ? '收起詳細資料 ▲' : '看詳細資料 ▼';
+  try { localStorage.setItem('cfdView', show ? 'full' : 'simple'); } catch (e) { /* 無法記住也沒關係 */ }
+  if (show) more.scrollIntoView({ behavior: 'smooth' });
+}
+function simpleView(d, o = {}) {
+  const n = v => Math.round((Number(v) || 0) * 10) / 10;
+  const roc = s => s ? `${Number(s.slice(0, 4)) - 1911} 年 ${Number(s.slice(5, 7))} 月 ${Number(s.slice(8, 10))} 日` : '';
+  const cy = Number(String(d.asOf || today()).slice(0, 4));
+  const certTrack = d.trackType === 'initial' || d.trackType === 'renewal';
+  const cert = d.activeCertificate;
+  const pending = (o.apps || []).some(a => a.status === '審核中');
+  const eligible = certTrack && (d.initialEligible || d.renewalCompliant);
+  // ① 一句話狀態（顏色＋大字）
+  let tone = 'ok', big, sub = '';
+  const code = d.statusCode;
+  if (d.trackType === 'exempt') { tone = 'muted'; big = '你不需要上師培課程'; sub = '你的職務不在臨床教師規定的範圍內。'; }
+  else if (pending) { tone = 'info'; big = '你的申請正在審核中'; sub = '師培中心審核完會更新，你不用做任何事。'; }
+  else if (d.trackType === 'physician' || d.trackType === 'annual') {
+    tone = d.compliant ? 'ok' : 'warn';
+    big = d.compliant ? `${cy - 1911} 年的時數已經完成` : `${cy - 1911} 年的時數還沒完成`;
+    sub = d.trackType === 'physician' ? (d.compliant ? '你是今年的臨床教師。' : '完成今年的時數，就是今年的臨床教師。') : '';
+  } else if (code === 'suspended') { tone = 'bad'; big = '你的教師資格暫停中'; sub = '把之前沒上完的時數補完，下個月 1 日就恢復。'; }
+  else if (eligible) { tone = 'ok'; big = d.trackType === 'renewal' ? '你已經可以續約（展延）了' : '你已經可以申請臨床教師了'; }
+  else if (code === 'valid') { tone = 'ok'; big = '你的臨床教師資格有效'; sub = cert ? `有效到 ${roc(cert.valid_end)}。` : ''; }
+  else if (code === 'expiring') { tone = 'warn'; big = '你的資格快到期了'; sub = cert ? `${roc(cert.valid_end)} 到期。` : ''; }
+  else if (code === 'expired') { tone = 'bad'; big = '你的臨床教師資格已經過期'; sub = '把時數上滿就可以重新申請。'; }
+  else { tone = 'warn'; big = '你還不是臨床教師'; sub = '上滿下面的課程時數，就可以申請。'; }
+  // ② 還要做什麼（最多 3 件，口語化）
+  const word = { teach: '教學能力提升課', total: '師培課（一般醫學或教學能力提升都算）', basic: '基礎課', adv: '進階課', irb: '人體試驗相關課程', makeup: '補上之前沒完成的時數' };
+  const todo = [];
+  (d.requirements || []).filter(q => !q.met).forEach(q => {
+    const gap = n(q.need - q.have);
+    if (q.key === 'items') todo.push(`再修 ${gap} 種不同的基礎課（課程設計、教學技巧、評估技巧、教材製作 任選）`);
+    else if (q.key === 'seniority') todo.push(`工作年資還差 ${gap} 年（課可以先上）`);
+    else if (q.key === 'makeup') todo.push(`先補上 ${gap} 小時之前沒完成的時數`);
+    else if (word[q.key]) todo.push(`再上 ${gap} 小時${word[q.key]}`);
+  });
+  // 期限：每年規範 → 今年 12/31；以效期計算（舊證展延）→ 效期到期日；初次認證沒有期限
+  const yearly = ((d.window || {}).years || []).length === 1;
+  const deadline = d.trackType === 'initial' ? '' : yearly || !cert ? `${cy - 1911} 年 12 月 31 日前` : `${roc(cert.valid_end)}前`;
+  let next;
+  if (d.trackType === 'exempt') next = '';
+  else if (pending) next = '等通知就好。';
+  else if (eligible) next = o.regime === 'new' ? '你不用自己送件，科部主管會幫你提報。' : (o.lookup ? '請登入系統，在「我的認證」按「申請」。' : '在下面詳細資料裡按「申請臨床教師認證」。');
+  else if (!todo.length) next = '目前不用再上課，繼續保持。';
+  else next = `${deadline ? `請在 ${deadline}完成：` : '完成下面這些就可以申請：'}`;
+  // ③ 我的學習路線（一句話）
+  const recs = (o.records || []).filter(x => Number(x.teaching_hours) > 0);
+  const itemOf = x => { const s = `${x.category || ''} ${x.course_title || ''}`; return BASIC.find(b => s.includes(b)) || ADVANCED.find(a => s.includes(a)); };
+  const cnt = {}; recs.forEach(x => { const i = itemOf(x); if (i) cnt[i] = (cnt[i] || 0) + Number(x.teaching_hours); });
+  const top = Object.entries(cnt).sort((a, b) => b[1] - a[1])[0];
+  const never = [...BASIC, ...ADVANCED].filter(i => !cnt[i]);
+  const route = !recs.length ? '' : `<section class="card sv-route"><h3>你的學習路線</h3>
+    <p>${top ? `你最常上的是 <b>${esc(top[0])}</b>。` : ''}${never.length && never.length < 9 ? `還沒上過：${never.slice(0, 3).map(esc).join('、')}${never.length > 3 ? ' 等' : ''}，可以試試看。` : ''}</p></section>`;
+  // ④ 點數小路（重用旅程卡裡的人像）
+  const have = Number(certTrack ? d.teachingHours : d.totalHours) || 0, need = Number(d.requiredTotalHours) || 0;
+  const p = need ? Math.min(100, have / need * 100) : 0;
+  const path = !need || d.trackType === 'exempt' ? '' : `<div class="pw ${have >= need ? 'arrived' : ''} sv-pw" role="img" aria-label="${n(have)} / ${n(need)} 小時">
+      <div class="pw-road"><i style="width:${p}%"></i></div>
+      <div class="pw-me" style="left:${have >= need ? 94 : p}%">${WALKER}<small>${have >= need ? '抵達！' : `${n(have)} 小時`}</small></div>
+      <div class="pw-goal">${FLAG}<small>${n(need)} 小時</small></div></div>`;
+  return `<section class="card sv sv-${tone}">
+      ${o.name ? `<div class="sv-hi">${esc(o.name)}，你好</div>` : ''}
+      <div class="sv-big">${esc(big)}</div>${sub ? `<p class="sv-sub">${esc(sub)}</p>` : ''}
+      ${path}
+      ${next || todo.length ? `<div class="sv-todo"><b>${esc(next)}</b>${todo.length && !eligible && !pending ? `<ul>${todo.slice(0, 3).map(t => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}</div>` : ''}
+    </section>${route}
+    <button class="btn btn-ghost sv-toggle" type="button" onclick="toggleView(this)">${simpleMode() ? '看詳細資料 ▼' : '收起詳細資料 ▲'}</button>`;
 }
 function endLookup() {
   clearTimeout(state.lkTimer);
@@ -1034,15 +1113,19 @@ function personHTML(o) {
   const dn = o.regime === 'new' ? d : row.detail_new;
   const grid = certTrack ? newGrid(dn, { title: o.regime === 'new' ? '新制認證進度' : `${(d.newRulePreview && d.newRulePreview.appliesFrom) || 116} 年起改採新制：進度試算` }) : '';
   // 結論 → 角色摘要 → 各資訊區塊（臨床教師／CFD 考核／核心教師／教職／師培講師／修課紀錄）
-  return hero + roleBar(d)
+  // 一般同仁看自己的頁面：先給簡單版，完整內容收在「看詳細資料」；管理者、主管查看他人時直接看完整版
+  const simple = own && !o.admin && o.role !== 'cfd_staff';
+  const full = hero + roleBar(d)
     + block('teacher', d.trackType === 'exempt' ? '' : journeyCard(d) + meters + transferCard(d, empId, apps, (own || o.admin) && !o.lookup) + next + (grid || preview) + years + (grid ? '' : items))
     + block('cfd', appraisalCard(d))
     + block('core', coreCard(d))
     + block('faculty', facultyCard(d), '新聘／升等')
     + block('lecturer', lecturerCard(d), '擔任教學能力提升課程講師')
     + block('pref', prefCard(records), '依修課紀錄分析')
-    + block('records', appList + recs)   // 結論 → 我的身分要完成什麼 → 下一步 → 細節
-    + (own && !o.lookup && !o.admin ? feedbackCard('login') : '');
+    + block('records', appList + recs);   // 結論 → 我的身分要完成什麼 → 下一步 → 細節
+  const fb = own && !o.lookup && !o.admin ? feedbackCard('login') : '';
+  if (!simple) return full + fb;
+  return simpleView(d, { records, apps, regime: o.regime, name: staff?.name || '' }) + `<div class="lk-more" ${simpleMode() ? 'hidden' : ''}>${full}</div>` + fb;
 }
 
 // 認證規範頁：主治醫師年度考核分數的計分方式
