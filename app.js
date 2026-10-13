@@ -230,13 +230,14 @@ function lookupHTML(r) {
   const dn = r.regime === 'new' ? d : r.row.detail_new;
   const grid = certTrack ? newGrid(dn, { big: true, title: r.regime === 'new' ? '新制認證進度' : `${(d.newRulePreview && d.newRulePreview.appliesFrom) || 116} 年起改採新制：進度試算` }) : '';
   return `<div class="lk">${hero}${roleBar(d)}
-    ${block('teacher', d.trackType === 'exempt' ? '' : reqCard(d, { big: true })
+    ${block('teacher', d.trackType === 'exempt' ? '' : journeyCard(d) + reqCard(d, { big: true })
       + (certTrack && !d.transferredFrom ? '<section class="card lk-note">由其他教學醫院轉任者：您的他院認證可以採認，視為展延教師。請登入後在「我的認證」上傳原認證證書申請查證。</section>' : '')
       + grid + next + (grid ? '' : preview))}
     ${block('cfd', appraisalCard(d, { big: true }))}
     ${block('core', coreCard(d))}
     ${block('faculty', facultyCard(d, { big: true }), '新聘／升等')}
     ${block('lecturer', lecturerCard(d), '擔任教學能力提升課程講師')}
+    ${block('pref', prefCard(r.records), '依修課紀錄分析')}
     ${block('records', detail + apps)}</div>`;
 }
 function endLookup() {
@@ -456,9 +457,9 @@ async function boot() {
   $('whoText').textContent = `${state.me.emp_id}${state.me.name ? ' ' + state.me.name : ''}｜${ROLE_LABEL[state.role]}${scopeLabel}`;
 
   const views = [];
-  if (state.role === 'cfd_staff') views.push(['calls', '來電紀錄'], ['dept', '名單查詢'], ['all', '全院總覽']);   // 承辦人員：以接聽來電、查詢為主
-  if (isAdmin()) views.push(['all', '全院總覽'], ['expiry', '到期與提報'], ['dept', '名單查詢']);
-  if (state.role === 'dept_coordinator') views.push(['dept', '科部總覽'], ['expiry', '到期與提報']);
+  if (state.role === 'cfd_staff') views.push(['calls', '來電紀錄'], ['dept', '名單查詢'], ['all', '全院總覽'], ['progress', '完成率']);   // 承辦人員：以接聽來電、查詢為主
+  if (isAdmin()) views.push(['all', '全院總覽'], ['progress', '完成率'], ['expiry', '到期與提報'], ['dept', '名單查詢']);
+  if (state.role === 'dept_coordinator') views.push(['dept', '科部總覽'], ['progress', '完成率'], ['expiry', '到期與提報']);
   views.push(['mine', '我的認證'], ['courses', '課程'], ['rules', '認證規範']);
   if (isAdmin()) views.push(['review', '審查'], ['calls', '來電紀錄']);
   // 課程辦理：最高管理者看全部；其他人只有在擔任某些課程的承辦人時才出現（資料列權限只回傳自己的課）
@@ -493,7 +494,7 @@ function go(view, arg) {
   state.view = view;
   $('nav').querySelectorAll('button').forEach(b => b.classList.toggle('is-active', b.dataset.view === view));
   $('content').innerHTML = '<div class="card empty">載入中…</div>';
-  const run = { mine: () => renderPerson(state.me.emp_id), person: () => renderPerson(arg, true), dept: renderList, all: renderOverview,
+  const run = { mine: () => renderPerson(state.me.emp_id), person: () => renderPerson(arg, true), dept: renderList, all: renderOverview, progress: renderProgress,
     courses: renderCourses, rules: renderRules, ratio: renderRatio, coursestats: renderCourseStats, calls: renderCalls, logs: renderLogs, plan: () => { state.planId = arg || null; return renderPlanPage(); }, review: renderReview, roster: renderRoster, admin: renderAdmin, expiry: renderExpiry }[view];
   // 連續快速切換頁面時，較早的頁面可能較晚才載完而蓋掉畫面：發現過期就重畫目前頁面
   const token = state.nav = (state.nav || 0) + 1;
@@ -585,7 +586,7 @@ function newGrid(dn, o = {}) {
 
 // ---------- 個人頁的資訊區塊：臨床教師／主治醫師年度考核（CFD 構面）／核心教師／教職／師培講師／修課紀錄（顏色區分） ----------
 const BLK = {
-  teacher: '臨床教師', cfd: '主治醫師年度考核｜CFD 構面', core: '核心教師', faculty: '教職', lecturer: '師培講師', records: '修課紀錄'
+  teacher: '臨床教師', cfd: '主治醫師年度考核｜CFD 構面', core: '核心教師', faculty: '教職', lecturer: '師培講師', pref: '學習偏好軌跡', records: '修課紀錄'
 };
 const block = (kind, inner, sub) => !inner ? '' : `<section class="blk blk-${kind}" id="blk-${kind}">
   <div class="blk-h"><span class="blk-dot" aria-hidden="true"></span><b>${BLK[kind]}</b>${sub ? `<small>${sub}</small>` : ''}</div>
@@ -744,6 +745,139 @@ function appraisalCard(d, o = {}) {
   </section>`;
 }
 
+// ---------- 認證旅程：效期時間軸（人像站在今天）＋點數小路（人像走到目前點數，旗子是目標） ----------
+const WALKER = `<svg class="walker" viewBox="0 0 32 48" aria-hidden="true"><circle cx="16" cy="7" r="6" fill="currentColor"/>
+  <path d="M16 14 L16 30 M16 18 L7 25 M16 18 L25 23 M16 30 L9 45 M16 30 L23 45" stroke="currentColor" stroke-width="4.5" stroke-linecap="round" fill="none"/></svg>`;
+const FLAG = '<svg class="flag" viewBox="0 0 24 36" aria-hidden="true"><path d="M4 2 V34" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><path d="M5 3 H21 L17 9 L21 15 H5 Z" fill="#FFCB0D" stroke="currentColor" stroke-width="1.5"/></svg>';
+function journeyCard(d) {
+  if (!d || d.trackType === 'exempt') return '';
+  const n = v => Math.round((Number(v) || 0) * 10) / 10;
+  const roc = s => `${Number(s.slice(0, 4)) - 1911}/${Number(s.slice(5, 7))}/${Number(s.slice(8, 10))}`;
+  const day = s => new Date(`${s}T00:00:00`).getTime();
+  const now = today();
+  const certTrack = d.trackType === 'initial' || d.trackType === 'renewal';
+  const cert = d.activeCertificate, last = d.lastCertificate;
+  // 時間軸的起訖：有效證書＝效期；剛屆滿（保留期）＝上一張效期延到今天；醫師等每年規範＝今年 1/1–12/31
+  let start, end, title, after = false;
+  if (cert && cert.valid_start && cert.valid_end) { start = cert.valid_start; end = cert.valid_end; title = '認證效期時間軸'; }
+  else if (certTrack && last && last.valid_start && last.valid_end) { start = last.valid_start; end = last.valid_end; title = '上一張認證的效期'; after = now > end; }
+  else if (!certTrack) { const y = now.slice(0, 4); start = `${y}-01-01`; end = `${y}-12-31`; title = `${Number(y) - 1911} 年度時間軸`; }
+  let timeline = '';
+  if (start) {
+    const span = Math.max(1, day(end) - day(start));
+    const pos = s => Math.max(0, Math.min(100, (day(s) - day(start)) / span * 100));
+    const me = after ? 100 : pos(now);
+    const left = Math.round((day(end) - day(now)) / 864e5);
+    const months = Math.floor(left / 30.4);
+    // 年度分段：新制每年要完成的時數，依逐年結果上色
+    const ys = Number(start.slice(0, 4)), ye = Number(end.slice(0, 4));
+    const yearly = new Map((d.yearly || []).map(y => [Number(y.roc) + 1911, y]));
+    const segs = [];
+    for (let y = ys; y <= ye; y++) {
+      const a = pos(y === ys ? start : `${y}-01-01`), b = pos(y === ye ? end : `${y}-12-31`);
+      if (b - a < 0.5) continue;
+      const st = (yearly.get(y) || {}).state || (String(y) < now.slice(0, 4) ? '' : String(y) === now.slice(0, 4) ? 'in_progress' : 'future');
+      segs.push(`<div class="tl-seg s-${esc(st)}" style="left:${a}%;width:${b - a}%" title="${y - 1911} 年${STATE_LABEL[st] ? '｜' + STATE_LABEL[st] : ''}"><span>${y - 1911}</span></div>`);
+    }
+    const near = !after && left >= 0 && left <= 183;
+    const caption = after ? `已於 ${roc(end)} 屆滿` : left < 0 ? '已屆滿' : certTrack ? `距到期還有 <b>${months >= 1 ? `${months} 個月` : `${left} 天`}</b>` : `今年度還剩 <b>${left} 天</b>`;
+    timeline = `<div class="tl" role="img" aria-label="${esc(title)}：${roc(start)} 至 ${roc(end)}，今天 ${roc(now)}">
+        <div class="tl-track">${segs.join('')}</div>
+        <div class="tl-me ${near || after ? 'warn' : ''}" style="left:${me}%">${WALKER}<small>今天</small></div>
+        <div class="tl-end" style="left:100%">${FLAG}</div></div>
+      <div class="tl-ends"><span>${roc(start)}<small>${certTrack ? '效期起' : '1 月 1 日'}</small></span><span class="tl-cap ${near || after ? 'warn' : ''}">${caption}</span><span>${roc(end)}<small>${certTrack ? '效期迄' : '12 月 31 日'}</small></span></div>
+      ${segs.length > 1 ? `<div class="legend tl-legend"><span><i class="s-met"></i>已達標</span><span><i class="s-in_progress"></i>今年進行中</span><span><i class="s-missed"></i>未達標</span><span><i class="s-future"></i>尚未開始</span></div>` : ''}`;
+  }
+  // 點數小路：人像依目前點數前進，旗子是本次要達到的點數
+  const have = Number(certTrack ? d.teachingHours : d.totalHours) || 0, need = Number(d.requiredTotalHours) || 0;
+  let path = '';
+  if (need) {
+    const p = Math.min(100, have / need * 100), arrived = have >= need;
+    const stones = Array.from({ length: Math.min(12, Math.ceil(need)) + 1 }, (_, i) => {
+      const v = need * i / Math.min(12, Math.ceil(need));
+      return `<span class="pw-stone ${have >= v ? 'on' : ''}" style="left:${i / Math.min(12, Math.ceil(need)) * 100}%"></span>`;
+    }).join('');
+    path = `<div class="pw ${arrived ? 'arrived' : ''}" role="img" aria-label="點數 ${n(have)} / ${n(need)}">
+        <div class="pw-road"><i style="width:${p}%"></i>${stones}</div>
+        <div class="pw-me" style="left:${arrived ? 94 : p}%">${WALKER}<small>${arrived ? '抵達！' : `${n(have)} 點`}</small></div>
+        <div class="pw-goal">${FLAG}<small>${n(need)} 點</small></div></div>
+      <p class="pw-cap">${arrived ? '<b>已抵達終點！</b>本次應完成的點數已達標。' : `已走了 <b>${Math.round(p)}%</b>，離終點還有 <b>${n(need - have)} 點</b>。`}<small>${esc(certTrack ? '教學能力提升點數' : '年度師培點數')}・${esc(d.window?.label || '')}</small></p>`;
+  }
+  if (!timeline && !path) return '';
+  return `<section class="card journey"><h3>我的認證旅程</h3>
+    ${timeline ? `<div class="group-label">${esc(title)}</div>${timeline}` : ''}
+    ${path ? `<div class="group-label">${certTrack ? '點數進度' : '今年度點數進度'}</div>${path}` : ''}</section>`;
+}
+
+// ---------- 學習偏好軌跡：從修課紀錄看偏好哪些教學能力項目、各年度的變化、常在幾月修課 ----------
+function prefCard(records) {
+  const recs = records || [];
+  if (recs.length < 2) return '';
+  const n = v => Math.round((Number(v) || 0) * 10) / 10;
+  const itemOf = x => {
+    const s = `${x.category || ''} ${x.course_title || ''}`;
+    return BASIC.find(b => s.includes(b)) || ADVANCED.find(a => s.includes(a)) || null;
+  };
+  const teach = recs.filter(x => Number(x.teaching_hours) > 0), gen = recs.filter(x => !(Number(x.teaching_hours) > 0) && Number(x.general_hours) > 0);
+  // 九大項目累計時數
+  const byItem = {}; let other = 0;
+  teach.forEach(x => { const i = itemOf(x); if (i) byItem[i] = (byItem[i] || 0) + Number(x.teaching_hours); else other += Number(x.teaching_hours); });
+  const items = [...BASIC, ...ADVANCED].map(i => [i, n(byItem[i] || 0)]);
+  const maxI = Math.max(1, ...items.map(x => x[1]));
+  const ranked = items.filter(x => x[1] > 0).sort((a, b) => b[1] - a[1]);
+  const totT = n(teach.reduce((a, x) => a + Number(x.teaching_hours), 0));
+  const totB = n(BASIC.reduce((a, i) => a + (byItem[i] || 0), 0)), totA = n(ADVANCED.reduce((a, i) => a + (byItem[i] || 0), 0));
+  const untouched = items.filter(x => !x[1]).map(x => x[0]);
+  // 一般醫學／院內課程：依課程類別
+  const byCat = {}; gen.forEach(x => { const c = (x.category || '其他').split(/[\/／]/)[0].trim() || '其他'; byCat[c] = (byCat[c] || 0) + Number(x.general_hours); });
+  const cats = Object.entries(byCat).sort((a, b) => b[1] - a[1]).slice(0, 6);
+  const maxC = Math.max(1, ...cats.map(c => c[1]));
+  // 各年度軌跡：基礎／進階／其他教學／一般 堆疊，加上當年最常修的項目
+  const years = [...new Set(recs.map(x => x.course_date.slice(0, 4)))].sort().slice(-6);
+  const yrRows = years.map(y => {
+    const t = teach.filter(x => x.course_date.startsWith(y)), g = gen.filter(x => x.course_date.startsWith(y));
+    const sum = (list, f) => n(list.reduce((a, x) => a + Number(x[f]), 0));
+    const b = sum(t.filter(x => BASIC.includes(itemOf(x))), 'teaching_hours'), a = sum(t.filter(x => ADVANCED.includes(itemOf(x))), 'teaching_hours');
+    const o = n(sum(t, 'teaching_hours') - b - a), gg = sum(g, 'general_hours');
+    const top = {}; t.forEach(x => { const i = itemOf(x); if (i) top[i] = (top[i] || 0) + Number(x.teaching_hours); });
+    const best = Object.entries(top).sort((p, q) => q[1] - p[1])[0];
+    return { y, b, a, o, g: gg, tot: n(b + a + o + gg), best: best ? best[0] : '' };
+  });
+  const maxY = Math.max(1, ...yrRows.map(r => r.tot));
+  const trail = yrRows.filter(r => r.best).map(r => `<span class="pf-step"><small>${Number(r.y) - 1911}</small>${esc(r.best)}</span>`).join('<span class="pf-arrow">→</span>');
+  // 月份分佈
+  const mon = Array(12).fill(0); recs.forEach(x => { mon[Number(x.course_date.slice(5, 7)) - 1]++; });
+  const maxM = Math.max(1, ...mon);
+  const peak = mon.map((v, i) => [i + 1, v]).filter(x => x[1]).sort((a, b) => b[1] - a[1]).slice(0, 2).map(x => `${x[0]} 月`);
+  // 解讀與建議
+  const tips = [];
+  if (ranked.length) tips.push(`最常修的是「${ranked[0][0]}」，占教學能力提升的 ${Math.round(ranked[0][1] / Math.max(1, totT) * 100)}%。`);
+  if (totB + totA > 0) tips.push(totA === 0 ? '目前只修過基礎課程；新制展延每年需要進階課程 2 小時，可以開始安排進階課。'
+    : totB === 0 ? '目前只修過進階課程；初次認證需要基礎課程至少 2 項、4 小時。'
+    : `基礎與進階的比例約 ${Math.round(totB / (totB + totA) * 100)} : ${Math.round(totA / (totB + totA) * 100)}。`);
+  if (untouched.length && untouched.length < 9) tips.push(`還沒修過：${untouched.join('、')}。可以挑一兩項拓展教學能力。`);
+  if (peak.length) tips.push(`多半在 ${peak.join('、')}修課。`);
+  return `<section class="card pref">
+    <div class="pf-grid">
+      <div><div class="group-label">九大教學能力項目（累計時數）</div>
+        ${items.map(([i, h]) => `<div class="pf-bar ${h ? '' : 'zero'} ${ranked[0] && ranked[0][0] === i ? 'top' : ''}"><span class="pf-l">${BASIC.includes(i) ? '<em class="b">基</em>' : '<em class="a">進</em>'}${esc(i)}</span>
+          <div class="pf-t"><i style="width:${h / maxI * 100}%"></i></div><span class="num">${h || '—'}</span></div>`).join('')}
+        ${other > 0 ? `<p class="hint">另有 ${n(other)} 小時教學能力提升課程未標示項目。</p>` : ''}</div>
+      <div><div class="group-label">一般醫學／院內課程（前 ${cats.length} 類）</div>
+        ${cats.length ? cats.map(([c, h]) => `<div class="pf-bar g"><span class="pf-l">${esc(c)}</span><div class="pf-t"><i style="width:${h / maxC * 100}%"></i></div><span class="num">${n(h)}</span></div>`).join('') : '<p class="hint">沒有一般課程紀錄。</p>'}
+        <div class="group-label" style="margin-top:14px">常在幾月修課</div>
+        <div class="pf-months">${mon.map((v, i) => `<span style="--a:${v / maxM}" title="${i + 1} 月：${v} 門"><b>${i + 1}</b></span>`).join('')}</div></div>
+    </div>
+    <div class="group-label">各年度軌跡</div>
+    <div class="pf-years">${yrRows.map(r => `<div class="pf-yr"><span class="pf-yl">${Number(r.y) - 1911} 年</span>
+      <div class="pf-stack" style="width:${Math.max(4, r.tot / maxY * 100)}%">${[['b', r.b, '基礎'], ['a', r.a, '進階'], ['o', r.o, '其他教學'], ['g', r.g, '一般']].map(([k, v, t]) => v > 0 ? `<i class="k-${k}" style="flex:${v}" title="${t} ${v} 點"></i>` : '').join('')}</div>
+      <span class="num">${r.tot}</span></div>`).join('')}</div>
+    <div class="legend"><span><i class="k-b"></i>基礎</span><span><i class="k-a"></i>進階</span><span><i class="k-o"></i>其他教學能力提升</span><span><i class="k-g"></i>一般醫學／院內</span></div>
+    ${trail ? `<div class="pf-trail"><span class="group-label" style="margin:0">偏好變化</span>${trail}</div>` : ''}
+    ${tips.length ? `<ul class="pf-tips">${tips.map(t => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}
+  </section>`;
+}
+
 async function renderPerson(empId, back) {
   const own = empId === state.me.emp_id;
   const [{ data: row, error }, { data: staff }, { data: records }, { data: apps }, { data: upcoming }, { data: myRegs }] = await Promise.all([
@@ -880,11 +1014,12 @@ function personHTML(o) {
   const grid = certTrack ? newGrid(dn, { title: o.regime === 'new' ? '新制認證進度' : `${(d.newRulePreview && d.newRulePreview.appliesFrom) || 116} 年起改採新制：進度試算` }) : '';
   // 結論 → 角色摘要 → 各資訊區塊（臨床教師／CFD 考核／核心教師／教職／師培講師／修課紀錄）
   return hero + roleBar(d)
-    + block('teacher', d.trackType === 'exempt' ? '' : meters + transferCard(d, empId, apps, (own || o.admin) && !o.lookup) + next + (grid || preview) + years + (grid ? '' : items))
+    + block('teacher', d.trackType === 'exempt' ? '' : journeyCard(d) + meters + transferCard(d, empId, apps, (own || o.admin) && !o.lookup) + next + (grid || preview) + years + (grid ? '' : items))
     + block('cfd', appraisalCard(d))
     + block('core', coreCard(d))
     + block('faculty', facultyCard(d), '新聘／升等')
     + block('lecturer', lecturerCard(d), '擔任教學能力提升課程講師')
+    + block('pref', prefCard(records), '依修課紀錄分析')
     + block('records', appList + recs)   // 結論 → 我的身分要完成什麼 → 下一步 → 細節
     + (own && !o.lookup && !o.admin ? feedbackCard('login') : '');
 }
@@ -986,9 +1121,11 @@ async function renderRatio() {
   const months = (data && data.value && data.value.months) || {};
   const keys = Object.keys(months).sort().reverse();
   if (!keys.length) { $('content').innerHTML = '<div class="card empty">尚無每月核定人員資料。師培中心執行 node tools/teacher-ratio.js 後會顯示。</div>'; return; }
+  const label = key => `${Number(key.slice(0, 3))} 年 ${Number(key.slice(4))} 月`;
+  const modeSeg = `<div class="seg">${[['one', '單月'], ['multi', '勾選多個月份分析']].map(([v, t]) => `<button type="button" class="${(state.ratioMode || 'one') === v ? 'is-active' : ''}" onclick="state.ratioMode='${v}';renderRatio()">${t}</button>`).join('')}</div>`;
+  if (state.ratioMode === 'multi') return renderRatioMulti(months, keys, label, modeSeg);
   const k = keys.includes(state.ratioMonth) ? state.ratioMonth : keys[0];
   const M = months[k], R = M.ratioRequired || 3;
-  const label = key => `${Number(key.slice(0, 3))} 年 ${Number(key.slice(4))} 月`;
   const bad = M.rows.filter(r => !r.ok);
   const invalid = M.rows.reduce((a, r) => a + r.teachersInvalid, 0);
   const row = r => {
@@ -1008,7 +1145,7 @@ async function renderRatio() {
     </tbody></table></div></section>`;
   $('content').innerHTML = `
     <section class="card"><h3>師生比｜衛福部臨床醫事人員培訓計畫</h3>
-      <div class="filters" style="align-items:center"><label style="margin:0;font-weight:700">月份 <select id="rMonth" style="display:inline-block;width:auto;margin-left:6px">${keys.map(x => `<option value="${x}" ${x === k ? 'selected' : ''}>${label(x)}</option>`).join('')}</select></label>
+      <div class="filters" style="align-items:center">${modeSeg}<label style="margin:0;font-weight:700">月份 <select id="rMonth" style="display:inline-block;width:auto;margin-left:6px">${keys.map(x => `<option value="${x}" ${x === k ? 'selected' : ''}>${label(x)}</option>`).join('')}</select></label>
         <span class="hint" style="margin:0">評鑑標準：每位臨床教師至多帶 ${R} 名 PGY 學員（師生比至少 1:${R}）。教師認證以 ${esc(M.ref)} 為準。</span></div>
     </section>
     <section class="kpis">
@@ -1024,6 +1161,66 @@ async function renderRatio() {
       <div class="note">師生比以「有效認證教師」計算。醫策會教師認證資料只列現職人員，名單上已離職的教師無法回溯查證，仍計入教師、另行標示。資料來源：${esc(M.file)}；教師認證比對：${esc(M.pecFile || '')}。</div></section>
     ${trend}`;
   $('rMonth').onchange = e => { state.ratioMonth = e.target.value; renderRatio(); };
+}
+
+// 師生比：勾選數個月份合併分析（各職類的平均師生比、最差月份、不符合的月數，及每月走勢）
+function renderRatioMulti(months, keys, label, modeSeg) {
+  const asc = [...keys].sort();
+  if (!state.ratioSel || !state.ratioSel.some(k => months[k])) state.ratioSel = [...asc];
+  const sel = asc.filter(k => state.ratioSel.includes(k));
+  const R = (months[asc[asc.length - 1]] || {}).ratioRequired || 3;
+  const years = [...new Set(asc.map(k => k.slice(0, 3)))];
+  const quick = [['all', '全選', asc], ['none', '清除', []], ['last3', '最近 3 個月', asc.slice(-3)], ['last6', '最近 6 個月', asc.slice(-6)],
+    ...years.flatMap(y => [[`h1${y}`, `${Number(y)} 年上半年`, asc.filter(k => k.startsWith(y) && Number(k.slice(4)) <= 6)], [`h2${y}`, `${Number(y)} 年下半年`, asc.filter(k => k.startsWith(y) && Number(k.slice(4)) > 6)]])]
+    .filter(q => q[0] === 'none' || q[2].length);
+  state.ratioQuick = Object.fromEntries(quick.map(q => [q[0], q[2]]));
+  const picker = `<div class="rm-pick">${asc.map(k => `<label class="rm-chip ${sel.includes(k) ? 'on' : ''}"><input type="checkbox" value="${k}" ${sel.includes(k) ? 'checked' : ''} onchange="ratioToggle(this)">${label(k)}</label>`).join('')}</div>
+    <div class="rm-quick">${quick.map(q => `<button class="btn btn-ghost" type="button" onclick="state.ratioSel=[...state.ratioQuick['${q[0]}']];renderRatio()">${q[1]}</button>`).join('')}</div>`;
+  const head = `<section class="card"><h3>師生比｜多月份分析</h3><div class="filters" style="align-items:center">${modeSeg}<span class="hint" style="margin:0">勾選要合併分析的月份（已選 ${sel.length} 個月）。評鑑標準：師生比至少 1:${R}。</span></div>${picker}</section>`;
+  if (!sel.length) { $('content').innerHTML = head + '<div class="card empty">請至少勾選一個月份。</div>'; return; }
+  // 各職類跨月彙整
+  const profs = [...new Set(sel.flatMap(k => months[k].rows.map(r => r.prof)))];
+  const agg = profs.map(p => {
+    const per = sel.map(k => ({ k, r: months[k].rows.find(r => r.prof === p) })).filter(x => x.r);
+    const avg = f => Math.round(per.reduce((a, x) => a + (Number(x.r[f]) || 0), 0) / per.length * 10) / 10;
+    const ratios = per.map(x => ({ k: x.k, v: x.r.teachersValid ? x.r.trainees / x.r.teachersValid : (x.r.trainees ? Infinity : 0), ok: x.r.ok }));
+    const worst = ratios.reduce((a, x) => (x.v > a.v ? x : a), ratios[0]);
+    const tv = avg('teachersValid'), tr = avg('trainees');
+    return { p, months: per.length, tv, tr, avgRatio: tv ? Math.round(tr / tv * 100) / 100 : null, worst, bad: per.filter(x => !x.r.ok).map(x => x.k),
+      invalid: per.reduce((a, x) => a + (x.r.teachersInvalid || 0), 0), series: sel.map(k => { const x = ratios.find(r => r.k === k); return x ? x.v : null; }) };
+  }).sort((a, b) => b.bad.length - a.bad.length || b.tr - a.tr);
+  const badProfs = agg.filter(a => a.bad.length);
+  const allOk = sel.filter(k => months[k].rows.every(r => r.ok)).length;
+  const fmtR = v => v == null ? '—' : v === Infinity ? '無有效教師' : `1 : ${Math.round(v * 100) / 100}`;
+  // 每月走勢小圖：柱高＝學員/有效教師，紅線＝1:R 上限
+  const top = Math.max(R * 1.25, ...agg.flatMap(a => a.series.filter(v => v != null && v !== Infinity)));
+  const spark = a => `<div class="rm-spark" title="各月師生比">${a.series.map((v, i) => `<i class="${v == null ? 'na' : v > R ? 'over' : ''}" style="height:${v == null ? 4 : v === Infinity ? 100 : Math.max(4, v / top * 100)}%" title="${label(sel[i])}：${fmtR(v)}"></i>`).join('')}<b style="bottom:${R / top * 100}%"></b></div>`;
+  const tot = sel.map(k => months[k].totals);
+  const avgT = f => Math.round(tot.reduce((a, t) => a + (Number(t[f]) || 0), 0) / tot.length * 10) / 10;
+  $('content').innerHTML = head + `
+    <section class="kpis">
+      <div class="kpi" style="--tone:${allOk === sel.length ? 'var(--success)' : 'var(--crimson)'}"><b class="num">${allOk} / ${sel.length}</b><span>月份全部職類符合 1:${R}</span></div>
+      <div class="kpi" style="--tone:${badProfs.length ? 'var(--warning)' : 'var(--success)'}"><b class="num">${badProfs.length} / ${agg.length}</b><span>職類曾有月份不符合</span></div>
+      <div class="kpi"><b class="num">${avgT('teachersValid')}</b><span>平均有效教師／月</span></div>
+      <div class="kpi" style="--tone:var(--secondary)"><b class="num">${avgT('trainees')}</b><span>平均 PGY 學員／月</span></div>
+    </section>
+    ${badProfs.length ? `<section class="card attention-card"><b>需要注意的職類</b><ul class="recs">${badProfs.map(a => `<li><b>${esc(a.p)}</b>：${a.bad.map(label).join('、')} 不符合（最差 ${fmtR(a.worst.v)}，${label(a.worst.k)}）</li>`).join('')}</ul></section>` : `<section class="card"><b>所選 ${sel.length} 個月，各職類每月都符合 1:${R}。</b></section>`}
+    <section class="card"><h3>各職類合併分析（${label(sel[0])}～${label(sel[sel.length - 1])}，共 ${sel.length} 個月）</h3>
+      <div class="table-wrap"><table><thead><tr><th>職類</th><th>平均有效教師</th><th>平均 PGY 學員</th><th>平均師生比</th><th>最差月份</th><th>不符合月數</th><th>每月走勢（紅線＝1:${R}）</th></tr></thead><tbody>
+      ${agg.map(a => `<tr class="${a.bad.length ? 'bad' : ''}"><td><b>${esc(a.p)}</b>${a.months < sel.length ? `<br><small class="muted">${a.months} 個月有資料</small>` : ''}</td>
+        <td class="num">${a.tv}${a.invalid ? `<br><small class="warn">累計 ${a.invalid} 人次認證有問題</small>` : ''}</td><td class="num">${a.tr}</td><td class="num"><b>${fmtR(a.avgRatio)}</b></td>
+        <td>${fmtR(a.worst.v)}<br><small>${label(a.worst.k)}</small></td>
+        <td>${a.bad.length ? `<span class="pill expired">${a.bad.length} 個月</span>` : '<span class="pill valid">0</span>'}</td><td>${spark(a)}</td></tr>`).join('')}
+      </tbody></table></div>
+      <div class="note">平均值為所選月份的月平均；師生比以「有效認證教師」計算。最差月份是學員對有效教師比例最高的月份。</div>
+      <button class="btn btn-ghost" type="button" id="rmCsv" style="width:auto;margin-top:8px">下載 CSV</button></section>`;
+  $('rmCsv').onclick = () => download(`師生比_多月份_${today()}.csv`, [['職類', '月份', '名單教師', '有效教師', '學員', '師生比', '是否符合'],
+    ...agg.flatMap(a => sel.map(k => { const r = months[k].rows.find(x => x.prof === a.p); return r ? [a.p, label(k), r.teachers, r.teachersValid, r.trainees, r.ratio == null ? '' : `1:${r.ratio}`, r.ok ? '符合' : '不符合'] : null; }).filter(Boolean))]);
+}
+function ratioToggle(cb) {
+  const s = new Set(state.ratioSel || []);
+  cb.checked ? s.add(cb.value) : s.delete(cb.value);
+  state.ratioSel = [...s]; renderRatio();
 }
 
 // ---------- 問題反映／諮詢：免登入查詢者與登入者都可填寫，師培中心在「來電紀錄」頁處理 ----------
@@ -1096,7 +1293,7 @@ async function feedbackInbox() {
 async function feedbackDone(id) { const d = await act('feedback.update', { id, status: '已回覆', reply: $(`fbR-${id}`) ? $(`fbR-${id}`).value : '' }); if (d) renderCalls(); }
 
 // ---------- 使用紀錄（管理者）：誰在什麼時候登入、查看了誰、免登入查詢、資料異動 ----------
-const LOG_TYPES = { login: ['登入系統'], person: ['查看個人頁'], search: ['員工編號查詢'], lookup: ['免登入查詢'] };
+const LOG_TYPES = { login: ['登入系統'], person: ['查看個人頁'], search: ['員工編號查詢'], lookup: ['免登入查詢'], notify: ['寄送提醒'] };
 async function renderLogs() {
   const f = state.logF = state.logF || { range: 'week', type: '', q: '' };
   const days = { today: 0, week: 6, month: 29, quarter: 89 }[f.range];
@@ -1136,7 +1333,7 @@ async function renderLogs() {
     <section class="card"><h3>使用紀錄</h3>
       <div class="filters" style="align-items:center">
         <div class="seg">${[['today', '今日'], ['week', '近 7 天'], ['month', '近 30 天'], ['quarter', '近 90 天']].map(([v, t]) => `<button type="button" class="${f.range === v ? 'is-active' : ''}" onclick="state.logF.range='${v}';renderLogs()">${t}</button>`).join('')}</div>
-        <select id="lgType" style="width:auto"><option value="">所有類型</option>${[['login', '登入系統'], ['person', '查看個人頁'], ['search', '員工編號查詢'], ['lookup', '免登入查詢'], ['change', '資料異動（審查、授權、上傳…）']].map(([v, t]) => `<option value="${v}" ${f.type === v ? 'selected' : ''}>${t}</option>`).join('')}</select>
+        <select id="lgType" style="width:auto"><option value="">所有類型</option>${[['login', '登入系統'], ['person', '查看個人頁'], ['search', '員工編號查詢'], ['lookup', '免登入查詢'], ['notify', '寄送提醒'], ['change','資料異動（審查、授權、上傳…）']].map(([v, t]) => `<option value="${v}" ${f.type === v ? 'selected' : ''}>${t}</option>`).join('')}</select>
         <input id="lgQ" type="search" placeholder="使用者或對象的員工編號、姓名" value="${esc(f.q)}" style="flex:1;min-width:180px">
         <button class="btn btn-ghost" type="button" id="lgCsv">下載 CSV</button></div>
       <p class="hint">只有師培中心管理者看得到這一頁。同一人 5 分鐘內重複查看同一頁只記一次；免登入查詢的「使用者」即被查詢的本人。</p></section>
@@ -1631,6 +1828,129 @@ function annualCard(list) {
     <div class="rule">今年度已達標 <b class="num">${met}</b> / ${annual.length} 人（${Math.round(met / annual.length * 100)}%）${exempt ? `；不列管 ${exempt} 人（行政及其他人員、PGY、代訓醫師等）` : ''}</div>
     <div class="legend"><span><i style="background:var(--success)"></i>已達標</span><span><i style="background:var(--mist)"></i>未達標</span></div>
     ${distRows(annual, r => r.track_type === 'physician' ? `醫師｜${r.cat || ''}` : (r.cat || '其他人員'))}${scoreBlock}</section>`;
+}
+
+// ---------- 完成率：依身分（PGY、住院醫師、研究醫師、主治醫師、各醫事職類）看應完成的比例，勾選未完成者寄信提醒 ----------
+// 「已完成」：醫師與每年規範者＝今年度時數達標；醫事認證教師＝本次應完成的點數已達標（或已可提報）；PGY 醫師不列管，以「今年有修課」表示參與
+const PG_DOC = ['PGY醫師', '住院醫師（第一、二年）', '住院醫師（第三年以上）', '研究醫師／完訓醫師', '主治醫師'];
+const pgGroup = r => {
+  if (r.track_type === 'exempt') return /PGY/.test(r.cat || '') ? 'PGY醫師' : null;
+  if (r.track_type === 'physician') return r.cat || '主治醫師';
+  if (r.track_type === 'annual') return '其他人員（每年時數）';
+  return profGroup(r);
+};
+const pgDone = r => {
+  if (r.track_type === 'exempt') return Number(r.tot) > 0;
+  if (r.track_type === 'physician' || r.track_type === 'annual') return r.cp === 'true';
+  if (r.can_apply) return true;
+  if (['suspended', 'expired', 'remedy'].includes(r.status_code)) return false;
+  return Number(r.gap_t || 0) <= 0 && Number(r.gap_b || 0) <= 0 && Number(r.gap_a || 0) <= 0;
+};
+const mailDomain = () => { try { return localStorage.getItem('cfdMailDomain') || 'mail.cmuh.org.tw'; } catch (e) { return 'mail.cmuh.org.tw'; } };
+const mailOf = emp => `${String(emp).trim()}@${mailDomain()}`;
+
+async function renderProgress() {
+  const list = await loadList();
+  const P = state.pg = state.pg || { group: '', show: 'todo', dept: '', sel: new Set() };
+  const rows = list.filter(r => pgGroup(r) && (!P.dept || r.dept === P.dept));
+  const groups = {};
+  rows.forEach(r => { const g = pgGroup(r); (groups[g] = groups[g] || { all: [], done: [] }).all.push(r); if (pgDone(r)) groups[g].done.push(r); });
+  const order = [...PG_DOC.filter(g => groups[g]), ...Object.keys(groups).filter(g => !PG_DOC.includes(g)).sort((a, b) => groups[b].all.length - groups[a].all.length)];
+  const depts = [...new Set(list.filter(pgGroup).map(r => r.dept).filter(Boolean))].sort();
+  const pct = g => Math.round(groups[g].done.length / groups[g].all.length * 100);
+  const totAll = rows.filter(r => r.track_type !== 'exempt'), totDone = totAll.filter(pgDone);
+  const card = g => {
+    const G = groups[g], p = pct(g), todo = G.all.length - G.done.length;
+    return `<button type="button" class="pg-card ${P.group === g ? 'on' : ''} ${g === 'PGY醫師' ? 'na' : ''}" onclick="state.pg.group=${esc(JSON.stringify(g))};state.pg.sel=new Set();renderProgress()">
+      <span class="pg-name">${esc(g)}</span>
+      <span class="pg-pct num">${p}<small>%</small></span>
+      <span class="pg-bar"><i style="width:${p}%" class="${p >= 80 ? 'ok' : p >= 50 ? 'mid' : 'low'}"></i></span>
+      <span class="pg-n">${g === 'PGY醫師' ? '今年有修課' : '已完成'} <b>${G.done.length}</b> / ${G.all.length}${todo ? `・<em>${g === 'PGY醫師' ? '未修課' : '未完成'} ${todo}</em>` : ''}</span></button>`;
+  };
+  const sec = (title, list) => !list.length ? '' : `<div class="group-label">${title}</div><div class="pg-grid">${list.map(card).join('')}</div>`;
+  // 下方名單：選定的身分
+  const G = P.group && groups[P.group];
+  let table = '';
+  if (G) {
+    const shown = (P.show === 'todo' ? G.all.filter(r => !pgDone(r)) : P.show === 'done' ? G.done : G.all)
+      .sort((a, b) => (a.dept || '').localeCompare(b.dept || '') || a.emp_id.localeCompare(b.emp_id));
+    state.pgShown = shown;
+    // 管理者：顯示每人被提醒過幾次（使用紀錄只有管理者讀得到）
+    let reminded = new Map();
+    if (isAdmin() && shown.length) {
+      const ids = shown.map(r => r.emp_id);
+      for (let i = 0; i < ids.length; i += 200) {
+        const { data } = await sb.from('audit_logs').select('target,at').eq('action', '寄送提醒').in('target', ids.slice(i, i + 200)).order('at', { ascending: false });
+        (data || []).forEach(l => { const x = reminded.get(l.target) || { n: 0, last: l.at }; x.n++; reminded.set(l.target, x); });
+      }
+    }
+    const allOn = shown.length && shown.every(r => P.sel.has(r.emp_id));
+    table = `<section class="card" id="pgList"><h3>${esc(P.group)}｜${P.show === 'todo' ? '未完成' : P.show === 'done' ? '已完成' : '全部'}名單（${shown.length} 人）</h3>
+      <div class="filters" style="align-items:center"><div class="seg">${[['todo', '未完成'], ['done', '已完成'], ['all', '全部']].map(([v, t]) => `<button type="button" class="${P.show === v ? 'is-active' : ''}" onclick="state.pg.show='${v}';state.pg.sel=new Set();renderProgress()">${t}</button>`).join('')}</div>
+        <span class="hint" style="margin:0">勾選後可在下方寄信提醒、複製信箱或下載名單。</span></div>
+      <div class="table-wrap"><table><thead><tr><th><input type="checkbox" aria-label="全選" ${allOn ? 'checked' : ''} onchange="pgAll(this.checked)"></th><th>員工編號</th><th>單位</th><th>職稱</th><th>點數</th><th>狀態</th><th>說明</th>${isAdmin() ? '<th>已提醒</th>' : ''}</tr></thead><tbody>
+      ${shown.slice(0, 1000).map(r => { const m = reminded.get(r.emp_id); return `<tr><td><input type="checkbox" ${P.sel.has(r.emp_id) ? 'checked' : ''} onchange="pgPick('${esc(r.emp_id)}',this.checked)"></td>
+        <td><button class="btn-link" type="button" onclick="go('person','${esc(r.emp_id)}')">${empLabel(r.emp_id)}</button></td><td>${esc(r.dept)}</td><td>${esc(r.staff?.title || '')}</td>
+        <td class="num">${esc(hoursOf(r))} / ${esc(r.need)}</td><td><span class="pill ${esc(r.status_code)}">${esc(String(r.status || '').replace(/^[^\p{L}\p{N}]+/u, ''))}</span></td><td class="reason">${esc(r.reason)}</td>
+        ${isAdmin() ? `<td>${m ? `${m.n} 次<br><small>${esc(fmtTime(m.last).split(' ')[0])}</small>` : '—'}</td>` : ''}</tr>`; }).join('') || '<tr><td colspan="8" class="empty">沒有人員</td></tr>'}
+      </tbody></table></div>${shown.length > 1000 ? '<p class="hint">畫面顯示前 1000 人，請用上方單位篩選縮小範圍。</p>' : ''}</section>`;
+  }
+  const n = P.sel.size;
+  $('content').innerHTML = `
+    <section class="card"><h3>各身分完成率｜${Number(today().slice(0, 4)) - 1911} 年度</h3>
+      <div class="filters" style="align-items:center"><select id="pgDept" style="width:auto"><option value="">${isCfd() ? '全院所有單位' : '所屬全部單位'}</option>${depts.map(d => `<option ${d === P.dept ? 'selected' : ''}>${esc(d)}</option>`).join('')}</select>
+        <span class="hint" style="margin:0">點身分卡片看名單。醫師與每年規範者：今年度時數達標；醫事認證教師：本次應完成的點數已達標或可提報；PGY 醫師不列管，以今年是否修課表示參與。</span></div>
+      <div class="pg-total"><b class="num">${totAll.length ? Math.round(totDone.length / totAll.length * 100) : 0}%</b><span>整體完成率（不含 PGY）<br><small>${totDone.length} / ${totAll.length} 人</small></span></div>
+    </section>
+    <section class="card">${sec('醫師（ED-026 第四條）', order.filter(g => PG_DOC.includes(g)))}${sec('醫事職類與其他人員', order.filter(g => !PG_DOC.includes(g)))}
+      ${order.length ? '' : '<div class="empty">沒有資料</div>'}</section>
+    ${table}
+    <div class="pg-act ${n ? 'on' : ''}"><span>已選 <b>${n}</b> 人</span>
+      <button class="btn btn-primary" type="button" onclick="pgMail()">寄信提醒</button>
+      <button class="btn btn-ghost" type="button" onclick="pgCopy('mail')">複製信箱</button>
+      <button class="btn btn-ghost" type="button" onclick="pgCopy('emp')">複製員工編號</button>
+      <button class="btn btn-ghost" type="button" onclick="pgCsv()">下載名單（可合併列印）</button>
+      <button class="btn-link" type="button" onclick="pgDomain()">信箱：員工編號@${esc(mailDomain())}</button></div>`;
+  $('pgDept').onchange = e => { P.dept = e.target.value; P.sel = new Set(); renderProgress(); };
+}
+function pgPick(emp, on) { on ? state.pg.sel.add(emp) : state.pg.sel.delete(emp); pgBar(); }
+function pgAll(on) { (state.pgShown || []).forEach(r => (on ? state.pg.sel.add(r.emp_id) : state.pg.sel.delete(r.emp_id))); renderProgress().then(() => $('pgList') && $('pgList').scrollIntoView()); }
+function pgBar() { const b = document.querySelector('.pg-act'); if (!b) return; b.classList.toggle('on', state.pg.sel.size > 0); b.querySelector('b').textContent = state.pg.sel.size; }
+const pgSelected = () => (state.list || []).filter(r => state.pg.sel.has(r.emp_id));
+function pgDomain() {
+  const v = prompt('院內信箱的網域（@ 後面的部分）。寄信時以「員工編號@網域」組成收件人。', mailDomain());
+  if (v == null) return;
+  try { localStorage.setItem('cfdMailDomain', v.trim().replace(/^@/, '')); } catch (e) { /* 無法儲存時本次仍用預設 */ }
+  renderProgress();
+}
+async function pgCopy(kind) {
+  const list = pgSelected(); if (!list.length) return toast('請先勾選人員', false);
+  const text = list.map(r => (kind === 'mail' ? mailOf(r.emp_id) : r.emp_id)).join(kind === 'mail' ? '; ' : '\n');
+  try { await navigator.clipboard.writeText(text); toast(`已複製 ${list.length} 人的${kind === 'mail' ? '信箱' : '員工編號'}`); } catch (e) { prompt('請手動複製：', text); }
+}
+function pgCsv() {
+  const list = pgSelected(); if (!list.length) return toast('請先勾選人員', false);
+  download(`完成率提醒名單_${state.pg.group || ''}_${today()}.csv`, [['員工編號', '姓名', '信箱', '單位', '職稱', '身分', '目前點數', '應完成', '狀態', '說明'],
+    ...list.map(r => [r.emp_id, nameOf(r.emp_id), mailOf(r.emp_id), r.dept, r.staff?.title || '', pgGroup(r), hoursOf(r), r.need, String(r.status || '').replace(/^[^\p{L}\p{N}]+/u, ''), r.reason])]);
+}
+// 以使用者自己的郵件程式（Outlook）開啟新郵件，收件人放密件副本；每批 25 人，避免連結過長（Outlook 約 2000 字元上限）
+function pgMail() {
+  const list = pgSelected(); if (!list.length) return toast('請先勾選人員', false);
+  const link = `${location.origin}${location.pathname}#lookup`;
+  const yr = Number(today().slice(0, 4)) - 1911;
+  const subject = `【師培中心】${yr} 年度臨床教師師培時數提醒`;
+  const body = `您好：\n\n依師培中心系統資料（${today()}），您 ${yr} 年度應完成的師培時數尚未達標。\n請至下列網址，以「員工編號＋身分證後 4 碼」查詢個人進度與尚缺項目：\n${link}\n\n如已完成或資料有誤，請點查詢頁右下角的小機器人反映，或洽師培中心。\n\n師資培育中心 敬上`;
+  const batches = []; for (let i = 0; i < list.length; i += 25) batches.push(list.slice(i, i + 25));
+  const href = b => `mailto:?bcc=${encodeURIComponent(b.map(r => mailOf(r.emp_id)).join(';'))}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  const record = (b, i) => api('notify.log', { emp_ids: b.map(r => r.emp_id), channel: 'email', group: `${state.pg.group || ''}${batches.length > 1 ? `｜第 ${i + 1} 批` : ''}` }).catch(() => {});
+  let dlg = $('pgDlg');
+  if (!dlg) { dlg = document.createElement('dialog'); dlg.id = 'pgDlg'; document.body.appendChild(dlg); dlg.addEventListener('click', e => { if (e.target === dlg) dlg.close(); }); }
+  dlg.innerHTML = `<div class="dlg-body"><div class="dlg-head"><h3>寄信提醒（${list.length} 人）</h3><button class="btn btn-ghost" type="button" onclick="$('pgDlg').close()">關閉</button></div>
+    <p class="hint">按下按鈕會用您電腦上的郵件程式（Outlook）開新郵件，收件人放在<b>密件副本</b>，彼此看不到。請確認內容後再自行按「傳送」。系統會記錄提醒日期，方便之後比對成效。</p>
+    <div class="pg-batches">${batches.map((b, i) => `<a class="btn btn-primary" href="${href(b)}" data-i="${i}">開啟郵件${batches.length > 1 ? `：第 ${i + 1} 批（${b.length} 人）` : ''}</a>`).join('')}</div>
+    <div class="group-label">信件內容（可在郵件程式中修改）</div><pre class="pg-preview">主旨：${esc(subject)}\n\n${esc(body)}</pre></div>`;
+  dlg.querySelectorAll('a[data-i]').forEach(a => { a.onclick = () => { const i = Number(a.dataset.i); if (!a.dataset.done) { a.dataset.done = '1'; record(batches[i], i); } a.classList.replace('btn-primary', 'btn-ghost'); a.textContent += '　✓ 已開啟'; }; });
+  dlg.showModal();
 }
 
 // ---------- 到期與提報：① 選時間 → ② 選職類 → ③ 名單與匯出（分段下鑽） ----------
