@@ -661,3 +661,14 @@ td input[type=checkbox], th input[type=checkbox] { width: 18px; height: 18px; ma
 .sv-route p { font-size: 17px; margin: 0; }
 .sv-toggle { width: 100%; font-size: 16px; padding: 12px; }
 @media (max-width: 720px) { .sv-big { font-size: 25px; } .sv-todo li { font-size: 17px; } }
+/* ---------- 課程滿意度 ---------- */
+.sat-top { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 12px; }
+.sat-top > div { background: var(--bg); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; }
+.sat-top b { font-size: 26px; color: var(--primary-dark); } .sat-top span { color: var(--muted); font-size: 13px; }
+.sat-top .warn b { color: #9a6b00; }
+.sat-bar { display: flex; height: 24px; border-radius: 6px; overflow: hidden; }
+.sat-bar i { display: flex; align-items: center; justify-content: center; color: #fff; font-style: normal; font-size: 12px; font-weight: 700; }
+.sat-cmp { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; margin-top: 10px; }
+.sat-cmp > span { min-width: 5em; color: var(--muted); } .sat-cmp small { color: var(--muted); }
+.lk-h.warn, td .warn { color: var(--crimson); font-weight: 700; }
+@media (max-width: 720px) { .sat-top { grid-template-columns: 1fr 1fr; } }

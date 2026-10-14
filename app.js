@@ -1569,7 +1569,8 @@ const CAT_NAME = { general: '一般醫學', teaching: '教學能力提升' };
 async function renderCourseStats() {
   // 資料列權限：最高管理者看全部；其他人只看得到自己擔任承辦人的課程
   const raw = await fetchAll(() => sb.from('course_stats').select('*').order('course_date'));
-  const all = raw.map(x => ({ c: x.cat, t: x.title, d: x.course_date, o: x.org, by: x.by_org, f: x.form || '', io: x.inout || '', h: Number(x.hours) || 0, p: x.passed, pr: x.prof || {}, orgz: x.organizer_names || '' }));
+  const all = raw.map(x => ({ c: x.cat, t: x.title, d: x.course_date, o: x.org, by: x.by_org, f: x.form || '', io: x.inout || '', h: Number(x.hours) || 0, p: x.passed, pr: x.prof || {}, orgz: x.organizer_names || '',
+    s: x.satisfaction == null ? null : Number(x.satisfaction), sc: x.avg_score == null ? null : Number(x.avg_score), pass: x.pass_rate == null ? null : Number(x.pass_rate) }));
   if (!all.length) { $('content').innerHTML = `<div class="card empty">${state.role === 'super_admin' ? '尚無課程辦理資料，請執行同步（node tools/sync-up.js）。' : '目前沒有您擔任承辦人的一般醫學或教學能力提升課程。'}</div>`; return; }
   const years = [...new Set(all.map(c => c.d.slice(0, 4)))].sort().reverse();
   const f = state.cs = state.cs || { year: years[0], cat: '', by: '', q: '' };
@@ -1625,20 +1626,46 @@ async function renderCourseStats() {
         <h3 style="margin-top:16px">課程形式</h3>
         ${forms.map(([k, v]) => `<div class="cs-form"><span>${esc(k)}</span><b class="num">${v.n}</b> 門・<b class="num">${v.p.toLocaleString()}</b> 人次</div>`).join('')}</div>
     </section>
-    <section class="card"><h3>課程滿意度</h3>
-      <p class="hint" style="margin:0">目前的「詳細修課紀錄」報表沒有滿意度欄位。請從教學系統匯出課程問卷／滿意度報表（含課程編號或課程名稱、滿意度分數），放在專案的「課程滿意度」資料夾，同步後這裡會顯示各課程的平均滿意度與分布。</p></section>
+    ${satCard(rows)}
     <section class="card"><h3>通過人次最多的 10 門課</h3><div class="table-wrap"><table><thead><tr><th>日期</th><th>類別</th><th>課程名稱</th><th>開課單位</th><th>形式</th><th>通過人次</th></tr></thead><tbody>
       ${top.map(c => `<tr><td>${esc(c.d)}</td><td>${CAT_NAME[c.c]}</td><td style="white-space:normal">${esc(c.t)}</td><td>${esc(c.o)}</td><td>${esc(c.f)}</td><td class="num"><b>${c.p.toLocaleString()}</b></td></tr>`).join('')}</tbody></table></div></section>
     <section class="card"><h3>課程清單（${listRows.length} 門）</h3>
       <div class="filters"><input id="csQ" type="search" placeholder="搜尋課程名稱或開課單位" value="${esc(f.q)}" style="flex:1"><button class="btn btn-ghost" type="button" id="csCsv">下載 CSV</button></div>
-      <div class="table-wrap"><table><thead><tr><th>日期</th><th>類別</th><th>課程名稱</th><th>開課單位</th><th>承辦人</th><th>形式</th><th>認證時數</th><th>通過人次</th><th>護理／醫師／醫事／其他</th></tr></thead><tbody>
+      <div class="table-wrap"><table><thead><tr><th>日期</th><th>類別</th><th>課程名稱</th><th>開課單位</th><th>承辦人</th><th>形式</th><th>認證時數</th><th>通過人次</th><th>滿意度</th><th>護理／醫師／醫事／其他</th></tr></thead><tbody>
       ${listRows.slice(0, 300).map(c => `<tr><td>${esc(c.d)}</td><td>${CAT_NAME[c.c]}</td><td style="white-space:normal;min-width:200px">${esc(c.t)}</td><td>${esc(c.o)}</td><td style="white-space:normal">${esc(c.orgz)}</td><td>${esc(c.f)}</td><td class="num">${n(c.h)}</td><td class="num">${c.p.toLocaleString()}</td>
+        <td class="num">${c.s == null ? '<small class="muted">未發問卷</small>' : `<span class="${c.s < 90 ? 'warn' : ''}">${n(c.s)}%</span>`}</td>
         <td class="num">${['護理', '醫師', '醫事', '其他'].map(k => (c.pr || {})[k] || 0).join('／')}</td></tr>`).join('')}</tbody></table></div>
       ${listRows.length > 300 ? '<p class="hint">畫面顯示前 300 門，完整清單請下載 CSV。</p>' : ''}</section>`;
   $('csYear').onchange = e => { f.year = e.target.value; renderCourseStats(); };
   $('csQ').onchange = e => { f.q = e.target.value; renderCourseStats(); };
-  $('csCsv').onclick = () => download(`課程辦理_${Number(f.year) - 1911}年.csv`, [['日期', '類別', '課程名稱', '開課單位', '教學部辦／科部辦', '承辦人', '形式', '內外訓', '認證時數', '通過人次', '護理', '醫師', '醫事', '其他'],
-    ...listRows.map(c => [c.d, CAT_NAME[c.c], c.t, c.o, c.by === 'cfd' ? '教學部辦' : '科部辦', c.orgz, c.f, c.io, n(c.h), c.p, ...['護理', '醫師', '醫事', '其他'].map(k => (c.pr || {})[k] || 0)])]);
+  $('csCsv').onclick = () => download(`課程辦理_${Number(f.year) - 1911}年.csv`, [['日期', '類別', '課程名稱', '開課單位', '教學部辦／科部辦', '承辦人', '形式', '內外訓', '認證時數', '通過人次', '滿意度(%)', '通過率(%)', '平均成績', '護理', '醫師', '醫事', '其他'],
+    ...listRows.map(c => [c.d, CAT_NAME[c.c], c.t, c.o, c.by === 'cfd' ? '教學部辦' : '科部辦', c.orgz, c.f, c.io, n(c.h), c.p, c.s ?? '', c.pass ?? '', c.sc ?? '', ...['護理', '醫師', '醫事', '其他'].map(k => (c.pr || {})[k] || 0)])]);
+}
+
+// 課程滿意度（教學系統「單位開課報表」的課程滿意度問卷 %）：發放率、平均、分布、面授／線上、教學部辦／科部辦、較低的課程
+function satCard(rows) {
+  const n = v => Math.round((Number(v) || 0) * 10) / 10;
+  const S = rows.filter(c => c.s != null);
+  if (!rows.some(c => c.s != null || c.pass != null)) return `<section class="card"><h3>課程滿意度</h3>
+    <p class="hint" style="margin:0">尚未匯入課程品質資料：請把教學系統的「單位開課報表」（division_course_create.xlsx）放在「開課報表」資料夾，並執行 supabase/013_course_quality.sql 後同步。</p></section>`;
+  const avg = list => list.length ? n(list.reduce((a, c) => a + c.s, 0) / list.length) : null;
+  const cov = Math.round(S.length / Math.max(1, rows.length) * 100);
+  const bins = [['95% 以上', c => c.s >= 95, 'var(--success)'], ['90–95%', c => c.s >= 90 && c.s < 95, 'var(--secondary)'], ['未滿 90%', c => c.s < 90, 'var(--crimson)']];
+  const cmp = (label, a, b, la, lb) => `<div class="sat-cmp"><span>${label}</span><b>${la} ${avg(a) == null ? '—' : avg(a) + '%'}</b><small>（${a.length} 門）</small><b>${lb} ${avg(b) == null ? '—' : avg(b) + '%'}</b><small>（${b.length} 門）</small></div>`;
+  const low = [...S].sort((a, b) => a.s - b.s).slice(0, 5);
+  if (!S.length) return `<section class="card"><h3>課程滿意度</h3><p class="hint" style="margin:0">這些課程都沒有發放滿意度問卷（共 ${rows.length} 門）。</p></section>`;
+  return `<section class="card sat"><h3>課程滿意度</h3>
+    <div class="sat-top">
+      <div><b class="num">${avg(S)}%</b><span>平均滿意度</span></div>
+      <div class="${cov < 50 ? 'warn' : ''}"><b class="num">${cov}%</b><span>有發問卷（${S.length} / ${rows.length} 門）</span></div>
+      <div><b class="num">${n(Math.min(...S.map(c => c.s)))}%</b><span>最低</span></div></div>
+    <div class="sat-bar">${bins.map(([t, fn, col]) => { const k = S.filter(fn).length; return k ? `<i style="flex:${k};background:${col}" title="${t}：${k} 門">${Math.round(k / S.length * 100)}%</i>` : ''; }).join('')}</div>
+    <div class="legend">${bins.map(([t, fn, col]) => `<span><i style="background:${col}"></i>${t} ${S.filter(fn).length} 門</span>`).join('')}</div>
+    ${cmp('授課形式', S.filter(c => c.f === '面授'), S.filter(c => c.f === '線上'), '面授', '線上')}
+    ${cmp('開課單位', S.filter(c => c.by === 'cfd'), S.filter(c => c.by === 'dept'), '教學部辦', '科部辦')}
+    <div class="group-label">滿意度最低的 5 門課</div>
+    <ul class="lk-list">${low.map(c => `<li><span class="lk-date">${esc(c.d.slice(5).replace('-', '/'))}</span><span class="lk-title">${esc(c.t)}<small>${esc(c.o)}・${esc(c.f)}・${c.p.toLocaleString()} 人次</small></span><span class="lk-h ${c.s < 90 ? 'warn' : ''}">${n(c.s)}%</span></li>`).join('')}</ul>
+    <div class="note">資料來源：教學系統「單位開課報表」的「課程滿意度問卷」，依課程編號對應。滿意度普遍很高、差異不大，<b>發放率</b>和<b>較低的課程</b>比平均值更值得注意；要看課程成效，建議搭配同仁之後是否持續修課等行為資料。</div></section>`;
 }
 
 // ---------- 職類別管理人：勾選要監測的單位（例如護理職類管理人勾選護理單位） ----------
