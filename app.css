@@ -691,3 +691,13 @@ td input[type=checkbox], th input[type=checkbox] { width: 18px; height: 18px; ma
 .nur-hint p { margin: 4px 0; }
 .nur-back { text-align: center; margin: 18px 0 0; }
 .act-way { display: flex; width: 100%; margin-bottom: 10px; } .act-way button { flex: 1; font-size: 13px; }
+
+/* ---------- 護理主管：提報列、單位師生比 ---------- */
+.nb-submit { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; background: var(--primary-light); border-radius: 10px; padding: 10px 12px; margin: 8px 0; }
+.nb-submit .btn { width: auto; } .nb-submit small { color: var(--muted); flex-basis: 100%; }
+.nr-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+.nr-card { display: grid; gap: 6px; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+.nr-card.bad { border-color: var(--crimson); background: #fff6f5; }
+.nr-r { font-size: 24px; font-weight: 800; color: var(--primary-dark); } .nr-card.bad .nr-r { color: var(--crimson); }
+.nr-card small { color: var(--muted); } .nr-card .pill { justify-self: start; }
+td.warn { color: var(--crimson); font-weight: 700; }

@@ -623,6 +623,8 @@ async function boot() {
   if (state.role === 'super_admin') views.push(['admin', '管理']);
   // 護理部認證概況（取代 Power BI）：師培中心人員、護理職類管理人與護理部單位主管；護理主管放在第一個
   if (canNursing()) { if (isCfd()) views.splice(views.findIndex(v => v[0] === 'all') + 1, 0, ['nursing', '護理部概況']); else views.unshift(['nursing', '護理部概況']); }
+  // 護理主管（護理長、督導）：只留教師概況、自己單位的師生比、醫事職類認證規範；職類管理人另有訓練計畫
+  if (nurseHead()) views.splice(0, views.length, ['nursing', '護理部概況'], ['ratio', '師生比'], ...(state.me.scope_profession ? [['plan', '訓練計畫']] : []), ['rules', '認證規範']);
   logView('login');
   idleGuard();
   setFab(isCfd() ? null : 'login');   // 師培中心人員是處理反映的人，不顯示
@@ -651,6 +653,14 @@ function idleGuard() {
   if (!state.idleBound) { ['click', 'keydown', 'scroll', 'touchstart'].forEach(ev => document.addEventListener(ev, () => { if (state.me && !isCfd()) reset(); }, { passive: true })); state.idleBound = true; }
   reset();
 }
+const nurseHead = () => state.role === 'dept_coordinator' && canNursing();
+// 護理主管的單位範圍：職類管理人＝勾選的單位（未勾選＝全部）；單位主管＝所屬單位（含下層）
+const inNurseScope = dept => {
+  const me = state.me || {};
+  if (isCfd()) return true;
+  if (me.scope_profession === '護理') return !(me.scope_units || []).length || me.scope_units.includes(dept);
+  return String(dept || '').startsWith(me.scope_dept || me.dept || '\u0000');
+};
 const canNursing = () => isCfd() || (state.role === 'dept_coordinator' &&
   (state.me.scope_profession === '護理' || state.me.profession === '護理' || String(state.me.scope_dept || state.me.dept || '').startsWith('護理部')));   // 護理長、護理主管（含兒童醫院、分院等護理單位）
 
@@ -1314,7 +1324,8 @@ async function renderRules() {
       ${(T.counseling_years || []).length ? `<li><b>輔導年（試行）：</b>${T.counseling_years.map(rocY).join('、')} 年未完成每年四小時者，只提醒、不暫停資格；之後的年度未完成，次年 1/1 起暫停資格，補滿後次月恢復。</li>` : ''}
     </ol>
     <div class="note">範例：效期原至 116/5/31 → 延至 116/12/31 → 116 年底展延 → 新證 117/1/1–120/12/31，117 年起每年四小時。</div></section>`;
-  $('content').innerHTML = you + doctors + allied + trans + others + common;
+  // 護理主管：只看醫事職類（新舊制）與過渡規定
+  $('content').innerHTML = nurseHead() ? you + allied + trans : you + doctors + allied + trans + others + common;
 }
 
 // ---------- 師生比：衛福部臨床醫事人員培訓計畫每月核定人員（核定點數 5000＝PGY 學員、0＝臨床教師），至少 1:3 ----------
@@ -1324,6 +1335,7 @@ async function renderRatio() {
   const keys = Object.keys(months).sort().reverse();
   if (!keys.length) { $('content').innerHTML = '<div class="card empty">尚無每月核定人員資料。師培中心執行 node tools/teacher-ratio.js 後會顯示。</div>'; return; }
   const label = key => `${Number(key.slice(0, 3))} 年 ${Number(key.slice(4))} 月`;
+  if (nurseHead()) return renderRatioUnits(months, keys, label);
   const modeSeg = `<div class="seg">${[['one', '單月'], ['multi', '勾選多個月份分析']].map(([v, t]) => `<button type="button" class="${(state.ratioMode || 'one') === v ? 'is-active' : ''}" onclick="state.ratioMode='${v}';renderRatio()">${t}</button>`).join('')}</div>`;
   if (state.ratioMode === 'multi') return renderRatioMulti(months, keys, label, modeSeg);
   const k = keys.includes(state.ratioMonth) ? state.ratioMonth : keys[0];
@@ -1361,6 +1373,41 @@ async function renderRatio() {
       <div class="table-wrap"><table><thead><tr><th>職類</th><th>名單教師</th><th>PGY 學員</th><th>師生比</th><th>帶教容量（有效教師 × ${R}）</th><th>1:${R}</th></tr></thead>
       <tbody>${M.rows.map(row).join('')}</tbody></table></div>
       <div class="note">師生比以「有效認證教師」計算。醫策會教師認證資料只列現職人員，名單上已離職的教師無法回溯查證，仍計入教師、另行標示。資料來源：${esc(M.file)}；教師認證比對：${esc(M.pecFile || '')}。</div></section>
+    ${trend}`;
+  $('rMonth').onchange = e => { state.ratioMonth = e.target.value; renderRatio(); };
+}
+
+// 護理主管的師生比：只看自己負責單位的護理師（核定名單依身分證字號對應名冊單位；雲端只有人數）
+function renderRatioUnits(months, keys, label) {
+  const k = keys.includes(state.ratioMonth) ? state.ratioMonth : keys[0];
+  const M = months[k], R = M.ratioRequired || 3;
+  const mine = m => (months[m].byUnit || []).filter(u => u.prof === '護理師' && inNurseScope(u.dept));
+  if (!M.byUnit) { $('content').innerHTML = '<div class="card empty">師生比資料尚未分單位，請師培中心重新執行 node tools/teacher-ratio.js。</div>'; return; }
+  const U = mine(k).sort((a, b) => (a.ok - b.ok) || b.trainees - a.trainees);
+  const sum = U.reduce((t, u) => ({ t: t.t + u.teachersValid, s: t.s + u.trainees }), { t: 0, s: 0 });
+  const hosp = (M.rows || []).find(r => r.prof === '護理師');
+  const fmt = (t, s) => !s ? '—' : !t ? '無教師' : `1 : ${Math.round(s / t * 100) / 100}`;
+  const asc = [...keys].sort().slice(-8);
+  const trend = U.length ? `<section class="card"><h3>近 ${asc.length} 個月</h3><div class="table-wrap"><table><thead><tr><th>單位</th>${asc.map(m => `<th>${Number(m.slice(4))} 月</th>`).join('')}</tr></thead><tbody>
+    ${U.map(u => `<tr><td>${esc(u.dept)}</td>${asc.map(m => { const x = (months[m].byUnit || []).find(y => y.prof === '護理師' && y.dept === u.dept); return `<td class="num ${x && !x.ok ? 'warn' : ''}" title="有效教師 ${x ? x.teachersValid : 0}、學員 ${x ? x.trainees : 0}">${x ? `${x.teachersValid}／${x.trainees}` : '—'}</td>`; }).join('')}</tr>`).join('')}
+    </tbody></table></div><p class="hint">格內為「有效教師／學員」，紅字為未達 1:${R}。</p></section>` : '';
+  $('content').innerHTML = `
+    <section class="card"><h3>師生比｜我負責的單位</h3>
+      <div class="filters" style="align-items:center"><label style="margin:0;font-weight:700">月份 <select id="rMonth" style="display:inline-block;width:auto;margin-left:6px">${keys.map(x => `<option value="${x}" ${x === k ? 'selected' : ''}>${label(x)}</option>`).join('')}</select></label>
+        <span class="hint" style="margin:0">每位臨床教師至多帶 ${R} 名 PGY 學員（師生比至少 1:${R}）。依 ${label(k)} 核定名單，教師以 ${esc(M.ref)} 是否持有效認證判定。</span></div></section>
+    <section class="kpis">
+      <div class="kpi" style="--tone:${U.some(u => !u.ok) ? 'var(--crimson)' : 'var(--success)'}"><b class="num">${U.filter(u => u.ok).length} / ${U.length}</b><span>單位符合 1:${R}</span></div>
+      <div class="kpi"><b class="num">${sum.t}</b><span>有效教師</span></div>
+      <div class="kpi" style="--tone:var(--secondary)"><b class="num">${sum.s}</b><span>PGY 學員</span></div>
+      <div class="kpi"><b class="num">${fmt(sum.t, sum.s)}</b><span>我負責單位合計</span></div></section>
+    <section class="card"><h3>${label(k)}各單位</h3>
+      ${U.length ? `<div class="nr-grid">${U.map(u => { const cap = u.teachersValid * R; return `<div class="nr-card ${u.ok ? '' : 'bad'}">
+        <b>${esc(u.dept)}</b><span class="nr-r num">${fmt(u.teachersValid, u.trainees)}</span>
+        <div class="cap-bar"><i style="width:${cap ? Math.min(100, u.trainees / cap * 100) : (u.trainees ? 100 : 0)}%" class="${u.ok ? '' : 'over'}"></i></div>
+        <small>有效教師 ${u.teachersValid}${u.teachers > u.teachersValid ? `（名單 ${u.teachers}）` : ''}・學員 ${u.trainees}・可帶 ${cap} 名</small>
+        ${u.ok ? '<span class="pill valid">符合</span>' : `<span class="pill expired">不符合，尚需 ${Math.ceil(u.trainees / R) - u.teachersValid} 位有效教師</span>`}</div>`; }).join('')}</div>`
+        : '<div class="empty">這個月份，您負責的單位沒有列在核定名單上的護理教師或學員。</div>'}
+      <div class="note">醫院評鑑以<b>全院護理職類合計</b>判定（${hosp ? `本月全院 ${fmt(hosp.teachersValid, hosp.trainees)}，${hosp.ok ? '符合' : '不符合'}` : '—'}）；單位數字供安排帶教參考。不足時，可在「護理部概況」找單位內持有效認證、但未列入核定名單的護理師。</div></section>
     ${trend}`;
   $('rMonth').onchange = e => { state.ratioMonth = e.target.value; renderRatio(); };
 }
@@ -2067,6 +2114,11 @@ async function renderNursing() {
   if (!list.length) { $('content').innerHTML = '<div class="card empty">您的權限範圍內沒有護理人員資料。</div>'; return; }
   const t = today();
   const F = state.nf = state.nf || { area: '', unit: '', level: '', status: '', q: '' };
+  // 提報：已符合認證／展延資格、尚未送出的人可以勾選提報，送到師培中心「審查」頁（資料列權限只回傳範圍內的申請）
+  const { data: pend } = await sb.from('applications').select('emp_id').eq('status', '審核中');
+  const pending = new Set((pend || []).map(a => a.emp_id));
+  const canSubmit = r => r.can_apply && !pending.has(r.emp_id) && (r.track_type === 'initial' || r.track_type === 'renewal');
+  state.nbSel = new Set([...(state.nbSel || [])].filter(e => list.some(r => r.emp_id === e && canSubmit(r))));
   const isValid = r => !!(r.ve && r.ve >= t);
   const in12 = (() => { const d = new Date(`${t}T00:00:00`); d.setMonth(d.getMonth() + 12); return d.toISOString().slice(0, 10); })();
   const cls = r => isValid(r) ? (r.ve <= in12 ? 'soon' : 'ok') : r.can_apply ? 'can' : r.status_code === 'expired' ? 'exp' : 'none';
@@ -2081,7 +2133,8 @@ async function renderNursing() {
     <div class="kpi"><b class="num">${scoped.length.toLocaleString()}</b><span>護理人員</span></div>
     <div class="kpi" style="--tone:var(--success)"><b class="num">${V.toLocaleString()}</b><span>持有效認證（${rate(scoped)}%）</span></div>
     <div class="kpi" style="--tone:var(--warning)"><b class="num">${cnt(scoped, 'soon')}</b><span>一年內到期</span></div>
-    <div class="kpi" style="--tone:var(--secondary)"><b class="num">${cnt(scoped, 'can')}</b><span>可提報認證</span></div></section>`;
+    <button type="button" class="kpi" style="--tone:var(--secondary)" onclick="state.nf.status='submit';renderNursing();document.getElementById('nbList').scrollIntoView({behavior:'smooth'})"><b class="num">${scoped.filter(canSubmit).length}</b><span>可提報（尚未送出）›</span></button></section>
+    ${scoped.some(r => pending.has(r.emp_id)) ? `<p class="hint" style="margin:-4px 0 0">另有 ${scoped.filter(r => pending.has(r.emp_id)).length} 人已提報，師培中心審核中。</p>` : ''}`;
   // ② 全體分布色帶
   const band = `<div class="nb-band">${Object.keys(CLS).map(k => { const v = cnt(scoped, k); return v ? `<i style="flex:${v};background:${CLS[k][1]}" title="${CLS[k][0]} ${v} 人"></i>` : ''; }).join('')}</div>
     <div class="legend">${Object.keys(CLS).map(k => `<span><i style="background:${CLS[k][1]}"></i>${CLS[k][0]} ${cnt(scoped, k)}</span>`).join('')}</div>`;
@@ -2104,9 +2157,11 @@ async function renderNursing() {
   uRows.sort((a, b) => sortKey === 'n' ? b.n - a.n : sortKey === 'soon' ? b.soon - a.soon : a.rate - b.rate || b.n - a.n);
   const watch = uRows.filter(u => u.n >= 5).sort((a, b) => a.rate - b.rate).slice(0, 5);
   // ⑥ 人員名單（點單位、能階或狀態篩選）
-  const people = scoped.filter(r => (!F.unit || (r.dept || '（未註明）') === F.unit) && (!F.level || N_LEVEL(r.staff?.title) === F.level) && (!F.status || cls(r) === F.status)
+  const stOk = r => !F.status || (F.status === 'submit' ? canSubmit(r) : F.status === 'pend' ? pending.has(r.emp_id) : cls(r) === F.status);
+  const people = scoped.filter(r => (!F.unit || (r.dept || '（未註明）') === F.unit) && (!F.level || N_LEVEL(r.staff?.title) === F.level) && stOk(r)
     && (!F.q || r.emp_id.toLowerCase().includes(F.q.toLowerCase()) || (r.staff?.name || '').includes(F.q)));
   people.sort((a, b) => (a.dept || '').localeCompare(b.dept || '') || (a.ve || '9').localeCompare(b.ve || '9'));
+  state.nbCan = people.filter(canSubmit).map(r => r.emp_id);
   const tag = (k, v) => v ? `<b>${esc(k)}</b> ${esc(v)}　<button class="btn-link" type="button" onclick="state.nf.${k === '單位' ? 'unit' : k === '能階' ? 'level' : 'status'}='';renderNursing()">✕</button>` : '';
   $('content').innerHTML = `
     <section class="card"><h3>護理部臨床教師認證概況</h3>
@@ -2132,14 +2187,19 @@ async function renderNursing() {
         <td class="num">${u.soon || ''}</td><td class="num">${u.can || ''}</td><td class="num">${u.exp || ''}</td></tr>`).join('')}</tbody></table></div></section>
     <section class="card" id="nbList"><h3>人員名單（${people.length} 人）</h3>
       <div class="filters" style="align-items:center">
-        <select id="nbSt" style="width:auto"><option value="">所有狀態</option>${Object.keys(CLS).map(k => `<option value="${k}" ${F.status === k ? 'selected' : ''}>${CLS[k][0]}</option>`).join('')}</select>
+        <select id="nbSt" style="width:auto"><option value="">所有狀態</option><option value="submit" ${F.status === 'submit' ? 'selected' : ''}>可提報（尚未送出）</option><option value="pend" ${F.status === 'pend' ? 'selected' : ''}>已提報・審核中</option>${Object.keys(CLS).map(k => `<option value="${k}" ${F.status === k ? 'selected' : ''}>${CLS[k][0]}</option>`).join('')}</select>
         <input id="nbQ" type="search" placeholder="員工編號或姓名" value="${esc(F.q)}" style="flex:1;min-width:160px">
         <button class="btn btn-ghost" type="button" id="nbCsv">下載名單</button></div>
       ${F.unit || F.level ? `<p class="hint">篩選：${tag('單位', F.unit)}${tag('能階', F.level)}</p>` : ''}
-      <div class="table-wrap"><table><thead><tr><th>員工編號</th><th>單位</th><th>職稱</th><th>狀態</th><th>效期至</th><th>教學點數</th><th>說明</th></tr></thead><tbody>
-      ${people.slice(0, 500).map(r => `<tr><td><button class="btn-link" type="button" onclick="go('person','${esc(r.emp_id)}')">${empLabel(r.emp_id)}</button></td><td>${esc(r.dept)}</td><td>${esc(r.staff?.title || '')}</td>
-        <td><span class="pill" style="background:${CLS[cls(r)][1]};color:${cls(r) === 'none' ? 'var(--text)' : '#fff'}">${CLS[cls(r)][0]}</span></td><td>${esc(r.valid_end || '')}</td>
-        <td class="num">${esc(r.teach)} / ${esc(r.need)}</td><td class="reason">${esc(r.reason)}</td></tr>`).join('') || '<tr><td colspan="7" class="empty">沒有符合的人員</td></tr>'}</tbody></table></div>
+      ${people.some(canSubmit) ? `<div class="nb-submit"><span>已勾選 <b id="nbSelN">${state.nbSel.size}</b> 人</span>
+        <button class="btn btn-ghost" type="button" onclick="nbSelAll()">勾選名單中可提報的 ${people.filter(canSubmit).length} 人</button>
+        <button class="btn btn-primary" type="button" onclick="nbSubmit()">提報給師培中心審核</button>
+        <small>送出後由師培中心在「審查」頁審核，結果會更新在這裡。</small></div>` : ''}
+      <div class="table-wrap"><table><thead><tr><th>提報</th><th>員工編號</th><th>單位</th><th>職稱</th><th>狀態</th><th>效期至</th><th>教學點數</th><th>說明</th></tr></thead><tbody>
+      ${people.slice(0, 500).map(r => `<tr><td>${canSubmit(r) ? `<input type="checkbox" aria-label="提報" ${state.nbSel.has(r.emp_id) ? 'checked' : ''} onchange="nbPick('${esc(r.emp_id)}',this.checked)">` : pending.has(r.emp_id) ? '<small class="muted">審核中</small>' : ''}</td>
+        <td><button class="btn-link" type="button" onclick="go('person','${esc(r.emp_id)}')">${empLabel(r.emp_id)}</button></td><td>${esc(r.dept)}</td><td>${esc(r.staff?.title || '')}</td>
+        <td><span class="pill" style="background:${CLS[cls(r)][1]};color:${cls(r) === 'none' ? 'var(--text)' : '#fff'}">${CLS[cls(r)][0]}</span>${pending.has(r.emp_id) ? ' <span class="pill expiring">已提報・審核中</span>' : canSubmit(r) && cls(r) !== 'can' ? ' <span class="pill eligible">可提報展延</span>' : ''}</td><td>${esc(r.valid_end || '')}</td>
+        <td class="num">${esc(r.teach)} / ${esc(r.need)}</td><td class="reason">${esc(r.reason)}</td></tr>`).join('') || '<tr><td colspan="8" class="empty">沒有符合的人員</td></tr>'}</tbody></table></div>
       ${people.length > 500 ? '<p class="hint">畫面顯示前 500 人，完整名單請下載。</p>' : ''}</section>`;
   $('nbSt').onchange = e => { F.status = e.target.value; renderNursing(); };
   $('nbQ').onchange = e => { F.q = e.target.value.trim(); renderNursing(); };
@@ -2147,6 +2207,23 @@ async function renderNursing() {
     ...people.map(r => [r.emp_id, nameOf(r.emp_id), r.dept, r.staff?.title || '', N_LEVEL(r.staff?.title), CLS[cls(r)][0], r.valid_end || '', r.teach, r.need, r.reason])]);
   $('nbUnitCsv').onclick = () => download(`護理部各單位認證率_${today()}.csv`, [['單位', '人數', '有效認證', '認證率(%)', '一年內到期', '可提報', '已過期'],
     ...uRows.map(u => [u.u, u.n, u.v, u.rate, u.soon, u.can, u.exp])]);
+}
+function nbPick(emp, on) { on ? state.nbSel.add(emp) : state.nbSel.delete(emp); if ($('nbSelN')) $('nbSelN').textContent = state.nbSel.size; }
+function nbSelAll() { (state.nbCan || []).forEach(e => state.nbSel.add(e)); renderNursing(); }
+// 逐一送出認證申請（cert.apply；伺服器端會再檢查範圍與資格），完成後重新整理
+async function nbSubmit() {
+  const ids = [...state.nbSel];
+  if (!ids.length) return toast('請先勾選要提報的人員', false);
+  if (!confirm(`確定將 ${ids.length} 人提報給師培中心審核？`)) return;
+  let okN = 0; const bad = [];
+  toast(`提報中…（0 / ${ids.length}）`);
+  for (const [i, emp] of ids.entries()) {
+    try { await api('cert.apply', { emp_id: emp, memo: '由護理部概況提報' }); okN++; } catch (e) { bad.push(`${emp}：${e.message}`); }
+    toast(`提報中…（${i + 1} / ${ids.length}）`);
+  }
+  state.nbSel = new Set(); state.list = null;
+  toast(`已提報 ${okN} 人給師培中心審核${bad.length ? `；${bad.length} 人未送出：${bad.slice(0, 3).join('；')}${bad.length > 3 ? '…' : ''}` : ''}`, !bad.length);
+  renderNursing();
 }
 async function nursingLink() {
   const url = `${location.origin}${location.pathname}#nursing`;
