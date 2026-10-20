@@ -78,19 +78,15 @@ function authMode() {
   let hint = $('nurHint');
   if (nursing && !hint) {
     hint = document.createElement('div'); hint.id = 'nurHint'; hint.className = 'nur-hint';
-    hint.innerHTML = '<p>請用<b>員工編號＋密碼</b>登入，登入後直接看到<b>您負責單位</b>的護理人員認證情形。</p><p>第一次使用或忘記密碼：點上方「開通帳號／忘記密碼」，輸入<b>員工編號＋身分證字號</b>，再自訂密碼即可。</p>';
+    hint.innerHTML = '<p>登入後直接看到<b>您負責單位</b>的護理人員認證情形。</p>';
     $('authMain').insertBefore(hint, $('authMain').querySelector('.tabs'));
-    const back = document.createElement('p'); back.id = 'nurBack'; back.className = 'nur-back';
-    back.innerHTML = '<button class="btn-link" type="button">一般同仁：查詢自己的認證進度 →</button>';
-    back.querySelector('button').onclick = () => { history.replaceState(null, '', location.pathname); authMode(); setTab('lookup'); };
-    $('authMain').appendChild(back);
   }
   if (hint) hint.hidden = !nursing;
   setActWay(state.actWay || 'id');
-  if ($('nurBack')) $('nurBack').hidden = !nursing;
+  setLoginWay(state.loginWay || 'l4');
 }
 window.addEventListener('hashchange', () => { if (!$('authView').hidden) authMode(); });
-// 登入頁兩條路：大按鈕「查詢我的認證進度」（免登入）／下方的登入、開通帳號
+// 登入頁：員工編號＋身分證後 4 碼登入（管理者可切換為密碼）；舊的 #lookup 連結仍顯示免登入查詢
 function setTab(which) {
   const lookup = which === 'lookup';
   if ($('authMain') && $('lookupPane')) { $('authMain').hidden = lookup; $('lookupPane').hidden = !lookup; }
@@ -134,7 +130,7 @@ function showLookup(r) {
     : '符合資格者請登入系統，在「我的認證」按「申請臨床教師認證」。';
   // 結論放最前面，使用說明放最後
   $('lkContent').innerHTML = lookupHTML(r) + feedbackCard('lookup') +
-    `<section class="card lk-note"><b>這是免登入的唯讀查詢。</b>${how}要報名課程或申請，請先登入；還沒有帳號者，請向科部主管或師培中心索取開通碼。
+    `<section class="card lk-note"><b>這是免登入的唯讀查詢。</b>${how}要報名課程或申請，請用同樣的員工編號＋身分證後 4 碼登入系統（不需要開通帳號）。
       <br><small>為保護個資，查詢畫面 10 分鐘後會自動關閉；使用公用電腦時，看完請按右上角「結束查詢」。</small></section>`;
   clearTimeout(state.lkTimer); state.lkTimer = setTimeout(endLookup, 10 * 60e3);
   setFab('lookup');
@@ -357,10 +353,45 @@ if ($('lkEnd')) $('lkEnd').onclick = endLookup;
 
 async function signIn(emp, password) {
   const { error } = await sb.auth.signInWithPassword({ email: emailOf(emp), password });
-  if (error) return showAuth('員工編號或密碼不正確。第一次使用請先以開通碼開通。');
+  if (error) return showAuth('員工編號或密碼不正確。');
   await boot();
 }
-$('loginForm').onsubmit = e => { e.preventDefault(); signIn($('loginEmp').value, $('loginPw').value); };
+// 登入：所有同仁用員工編號＋身分證後 4 碼（伺服器驗證後回傳一次性憑證，瀏覽器換成登入狀態）；師培中心管理者用密碼
+async function signInLast4(emp, last4) {
+  showAuth('登入中…', true);
+  try {
+    const res = await fetch(`${window.APP_CONFIG.url}/functions/v1/activate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: window.APP_CONFIG.anonKey, Authorization: `Bearer ${window.APP_CONFIG.anonKey}` },
+      body: JSON.stringify({ action: 'login', emp_id: emp.trim(), last4: last4.trim() })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (data.passwordOnly) { setLoginWay('pw'); return showAuth(data.message); }
+    if (!data.success) return showAuth(data.message || '登入失敗，請稍後再試。');
+    let r = await sb.auth.verifyOtp({ token_hash: data.token_hash, type: 'magiclink' });
+    if (r.error) r = await sb.auth.verifyOtp({ token_hash: data.token_hash, type: 'email' });
+    if (r.error) return showAuth('登入失敗：' + r.error.message);
+    $('loginForm').reset();
+    await boot();
+  } catch (err) { showAuth('無法連線到登入服務，請稍後再試。'); }
+}
+function setLoginWay(way) {
+  state.loginWay = way === 'pw' ? 'pw' : 'l4';
+  const pw = state.loginWay === 'pw';
+  $('loginL4L').hidden = pw; $('loginPwL').hidden = !pw;
+  $('loginL4').required = !pw; $('loginPw').required = pw;
+  $('loginHint').innerHTML = pw ? '師培中心管理者與承辦人員：請用<b>員工編號＋密碼</b>登入。' : '輸入<b>員工編號</b>與<b>身分證字號最後 4 碼</b>即可登入，不需要開通帳號或設定密碼。';
+  $('pwToggle').textContent = pw ? '一般同仁：用身分證後 4 碼登入' : '師培中心管理者：用密碼登入';
+  $('pwForgot').hidden = !pw;
+}
+$('loginForm').onsubmit = e => {
+  e.preventDefault();
+  if (state.loginWay === 'pw') signIn($('loginEmp').value, $('loginPw').value);
+  else signInLast4($('loginEmp').value, $('loginL4').value);
+};
+if ($('pwToggle')) $('pwToggle').onclick = () => setLoginWay(state.loginWay === 'pw' ? 'l4' : 'pw');
+if ($('pwForgot')) $('pwForgot').onclick = () => setTab('activate');
+if ($('backLogin')) $('backLogin').onclick = () => setTab('login');
 // 開通／忘記密碼：員工編號＋身分證字號（預設）；名冊沒有證號資料者改用師培中心發的開通碼
 function setActWay(way) {
   state.actWay = way === 'code' ? 'code' : 'id';
@@ -370,7 +401,7 @@ function setActWay(way) {
   $('actId').required = !code; $('actCode').required = code;
   $('actHint').textContent = code
     ? '請輸入師培中心發給您的一次性開通碼，並自訂密碼。'
-    : '第一次使用或忘記密碼：輸入員工編號與身分證字號，再自訂密碼即可。';
+    : '師培中心管理者忘記密碼：輸入員工編號與完整身分證字號，再設定新密碼。';
   $('wayToggle').textContent = code ? '改用員工編號＋身分證字號' : '名冊沒有我的證號資料？改用師培中心發的開通碼';
 }
 if ($('wayToggle')) $('wayToggle').onclick = () => setActWay(state.actWay === 'code' ? 'id' : 'code');
@@ -593,6 +624,7 @@ async function boot() {
   // 護理部認證概況（取代 Power BI）：師培中心人員、護理職類管理人與護理部單位主管；護理主管放在第一個
   if (canNursing()) { if (isCfd()) views.splice(views.findIndex(v => v[0] === 'all') + 1, 0, ['nursing', '護理部概況']); else views.unshift(['nursing', '護理部概況']); }
   logView('login');
+  idleGuard();
   setFab(isCfd() ? null : 'login');   // 師培中心人員是處理反映的人，不顯示
   $('nav').innerHTML = views.map(([v, t]) => `<button type="button" data-view="${v}">${t}</button>`).join('');
   if ($('empSearch')) $('empSearch').hidden = !(isCfd() || state.role === 'dept_coordinator');
@@ -609,6 +641,15 @@ async function boot() {
   // 專用連結：…/#nursing 登入後直接開護理部概況
   if (location.hash === '#nursing' && canNursing()) return go('nursing');
   go(views[0][0]);
+}
+// 以身分證後 4 碼登入的同仁不設密碼：隱藏「變更密碼」；閒置 30 分鐘自動登出（公用電腦保護個資）
+function idleGuard() {
+  if ($('pwBtn')) $('pwBtn').hidden = !isCfd();
+  clearTimeout(state.idleT);
+  if (isCfd()) return;
+  const reset = () => { clearTimeout(state.idleT); state.idleT = setTimeout(async () => { await sb.auth.signOut(); state.me = null; $('content').innerHTML = ''; showAuth('閒置超過 30 分鐘，已自動登出。'); }, 30 * 60e3); };
+  if (!state.idleBound) { ['click', 'keydown', 'scroll', 'touchstart'].forEach(ev => document.addEventListener(ev, () => { if (state.me && !isCfd()) reset(); }, { passive: true })); state.idleBound = true; }
+  reset();
 }
 const canNursing = () => isCfd() || (state.role === 'dept_coordinator' &&
   (state.me.scope_profession === '護理' || state.me.profession === '護理' || String(state.me.scope_dept || state.me.dept || '').startsWith('護理部')));   // 護理長、護理主管（含兒童醫院、分院等護理單位）
