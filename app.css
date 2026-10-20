@@ -672,3 +672,15 @@ td input[type=checkbox], th input[type=checkbox] { width: 18px; height: 18px; ma
 .sat-cmp > span { min-width: 5em; color: var(--muted); } .sat-cmp small { color: var(--muted); }
 .lk-h.warn, td .warn { color: var(--crimson); font-weight: 700; }
 @media (max-width: 720px) { .sat-top { grid-template-columns: 1fr 1fr; } }
+/* ---------- 護理部概況 ---------- */
+.nb-band { display: flex; height: 28px; border-radius: 8px; overflow: hidden; }
+.nb-band i { display: block; }
+.nb-row { display: grid; grid-template-columns: minmax(0, 9em) 1fr 3.6em 5.5em; align-items: center; gap: 8px; width: 100%; border: 0; background: transparent; padding: 6px 4px; border-radius: 8px; cursor: pointer; font: inherit; color: inherit; text-align: left; }
+.nb-row:hover { background: var(--bg); } .nb-row.on { background: var(--primary-light); }
+.nb-l { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.nb-row small { color: var(--muted); text-align: right; } .nb-row .num { text-align: right; font-weight: 700; }
+.nb-t { display: block; height: 12px; background: #e8edf0; border-radius: 6px; overflow: hidden; min-width: 60px; }
+.nb-t i { display: block; height: 100%; background: var(--success); border-radius: 6px; } .nb-t.low i { background: var(--warning); }
+.nb-cell { display: flex; align-items: center; gap: 8px; min-width: 140px; } .nb-cell .nb-t { flex: 1; }
+.nb-exp .cs-bars i.t { background: var(--warning); }
+.nb-units { max-height: 520px; overflow: auto; }

@@ -550,6 +550,8 @@ async function boot() {
   else if (showCs) views.push(['coursestats', '課程辦理']);
   if (isAdmin()) views.push(['logs', '使用紀錄']);
   if (state.role === 'super_admin') views.push(['admin', '管理']);
+  // 護理部認證概況（取代 Power BI）：師培中心人員、護理職類管理人與護理部單位主管；護理主管放在第一個
+  if (canNursing()) { if (isCfd()) views.splice(views.findIndex(v => v[0] === 'all') + 1, 0, ['nursing', '護理部概況']); else views.unshift(['nursing', '護理部概況']); }
   logView('login');
   setFab(isCfd() ? null : 'login');   // 師培中心人員是處理反映的人，不顯示
   $('nav').innerHTML = views.map(([v, t]) => `<button type="button" data-view="${v}">${t}</button>`).join('');
@@ -564,8 +566,12 @@ async function boot() {
     if (d) toast(`${d.message}｜${d.course.title}（${d.course.hours} 點）`);
     return go('mine');
   }
+  // 專用連結：…/#nursing 登入後直接開護理部概況
+  if (location.hash === '#nursing' && canNursing()) return go('nursing');
   go(views[0][0]);
 }
+const canNursing = () => isCfd() || (state.role === 'dept_coordinator' &&
+  (state.me.scope_profession === '護理' || String(state.me.scope_dept || state.me.dept || '').startsWith('護理部')));
 
 function go(view, arg) {
   clearInterval(state.qrTimer);
@@ -573,7 +579,7 @@ function go(view, arg) {
   state.view = view;
   $('nav').querySelectorAll('button').forEach(b => b.classList.toggle('is-active', b.dataset.view === view));
   $('content').innerHTML = '<div class="card empty">載入中…</div>';
-  const run = { mine: () => renderPerson(state.me.emp_id), person: () => renderPerson(arg, true), dept: renderList, all: renderOverview, progress: renderProgress,
+  const run = { mine: () => renderPerson(state.me.emp_id), person: () => renderPerson(arg, true), dept: renderList, all: renderOverview, progress: renderProgress, nursing: renderNursing,
     courses: renderCourses, rules: renderRules, ratio: renderRatio, coursestats: renderCourseStats, calls: renderCalls, logs: renderLogs, plan: () => { state.planId = arg || null; return renderPlanPage(); }, review: renderReview, roster: renderRoster, admin: renderAdmin, expiry: renderExpiry }[view];
   // 連續快速切換頁面時，較早的頁面可能較晚才載完而蓋掉畫面：發現過期就重畫目前頁面
   const token = state.nav = (state.nav || 0) + 1;
@@ -1970,6 +1976,100 @@ function annualCard(list) {
     <div class="rule">今年度已達標 <b class="num">${met}</b> / ${annual.length} 人（${Math.round(met / annual.length * 100)}%）${exempt ? `；不列管 ${exempt} 人（行政及其他人員、PGY、代訓醫師等）` : ''}</div>
     <div class="legend"><span><i style="background:var(--success)"></i>已達標</span><span><i style="background:var(--mist)"></i>未達標</span></div>
     ${distRows(annual, r => r.track_type === 'physician' ? `醫師｜${r.cat || ''}` : (r.cat || '其他人員'))}${scoreBlock}</section>`;
+}
+
+// ---------- 護理部認證概況（取代 Power BI；資料每次同步自動更新）----------
+// 範圍：執登職類為護理者；資料列權限決定看得到哪些人（師培中心全院；護理職類管理人依勾選單位；護理部單位主管依所屬單位）
+const N_LEVEL = t => { const m = String(t || '').match(/\((NP\d?|N\d?|DN)\)/); return m ? m[1] : (/護理長/.test(t) ? '護理長' : /督導/.test(t) ? '督導' : '其他'); };
+async function renderNursing() {
+  const list = (await loadList()).filter(r => r.staff?.profession === '護理');
+  if (!list.length) { $('content').innerHTML = '<div class="card empty">您的權限範圍內沒有護理人員資料。</div>'; return; }
+  const t = today();
+  const F = state.nf = state.nf || { area: '', unit: '', level: '', status: '', q: '' };
+  const isValid = r => !!(r.ve && r.ve >= t);
+  const in12 = (() => { const d = new Date(`${t}T00:00:00`); d.setMonth(d.getMonth() + 12); return d.toISOString().slice(0, 10); })();
+  const cls = r => isValid(r) ? (r.ve <= in12 ? 'soon' : 'ok') : r.can_apply ? 'can' : r.status_code === 'expired' ? 'exp' : 'none';
+  const CLS = { ok: ['認證有效', 'var(--success)'], soon: ['一年內到期', 'var(--warning)'], can: ['可提報認證', 'var(--secondary)'], exp: ['已過期（保留期）', 'var(--crimson)'], none: ['尚未認證', '#c9d3da'] };
+  const area = r => (r.dept || '').startsWith('護理部') ? '護理部' : '非護理部';
+  const scoped = list.filter(r => (!F.area || area(r) === F.area));
+  const rate = L => L.length ? Math.round(L.filter(isValid).length / L.length * 1000) / 10 : 0;
+  const cnt = (L, k) => L.filter(r => cls(r) === k).length;
+  // ① 四個大數字
+  const V = scoped.filter(isValid).length;
+  const kpi = `<section class="kpis">
+    <div class="kpi"><b class="num">${scoped.length.toLocaleString()}</b><span>護理人員</span></div>
+    <div class="kpi" style="--tone:var(--success)"><b class="num">${V.toLocaleString()}</b><span>持有效認證（${rate(scoped)}%）</span></div>
+    <div class="kpi" style="--tone:var(--warning)"><b class="num">${cnt(scoped, 'soon')}</b><span>一年內到期</span></div>
+    <div class="kpi" style="--tone:var(--secondary)"><b class="num">${cnt(scoped, 'can')}</b><span>可提報認證</span></div></section>`;
+  // ② 全體分布色帶
+  const band = `<div class="nb-band">${Object.keys(CLS).map(k => { const v = cnt(scoped, k); return v ? `<i style="flex:${v};background:${CLS[k][1]}" title="${CLS[k][0]} ${v} 人"></i>` : ''; }).join('')}</div>
+    <div class="legend">${Object.keys(CLS).map(k => `<span><i style="background:${CLS[k][1]}"></i>${CLS[k][0]} ${cnt(scoped, k)}</span>`).join('')}</div>`;
+  // ③ 能階
+  const lv = {}; scoped.forEach(r => { const k = N_LEVEL(r.staff?.title); (lv[k] = lv[k] || []).push(r); });
+  const LV_ORDER = ['N', 'N1', 'N2', 'N3', 'N4', 'NP', 'NP1', 'NP2', 'DN', '護理長', '督導', '其他'];
+  const levels = Object.entries(lv).sort((a, b) => LV_ORDER.indexOf(a[0]) - LV_ORDER.indexOf(b[0]));
+  const lvRows = levels.map(([k, L]) => `<button type="button" class="nb-row ${F.level === k ? 'on' : ''}" onclick="state.nf.level=state.nf.level===${esc(JSON.stringify(k))}?'':${esc(JSON.stringify(k))};renderNursing()">
+    <span class="nb-l">${esc(k)}</span><span class="nb-t"><i style="width:${rate(L)}%"></i></span><span class="num">${rate(L)}%</span><small>${L.filter(isValid).length} / ${L.length}</small></button>`).join('');
+  // ④ 到期月份（未來 24 個月）
+  const months = Array.from({ length: 24 }, (_, i) => { const d = new Date(`${t.slice(0, 7)}-01T00:00:00`); d.setMonth(d.getMonth() + i); return d.toISOString().slice(0, 7); });
+  const byM = months.map(m => scoped.filter(r => isValid(r) && r.ve.startsWith(m)).length);
+  const maxM = Math.max(1, ...byM);
+  const exp = `<div class="cs-chart nb-exp" style="grid-template-columns:repeat(24,1fr)">${months.map((m, i) => `<div class="cs-col"><div class="cs-bars"><i class="t" style="height:${byM[i] / maxM * 100}%" title="${Number(m.slice(0, 4)) - 1911}/${Number(m.slice(5))}：${byM[i]} 人到期"></i></div>
+    <span class="cs-m">${i % 3 === 0 ? `${Number(m.slice(0, 4)) - 1911}/${Number(m.slice(5))}` : ''}</span><small>${byM[i] || ''}</small></div>`).join('')}</div>`;
+  // ⑤ 各單位
+  const units = {}; scoped.forEach(r => { (units[r.dept || '（未註明）'] = units[r.dept || '（未註明）'] || []).push(r); });
+  const uRows = Object.entries(units).map(([u, L]) => ({ u, n: L.length, v: L.filter(isValid).length, rate: rate(L), soon: cnt(L, 'soon'), can: cnt(L, 'can'), exp: cnt(L, 'exp') }));
+  const sortKey = state.nfSort || 'rate';
+  uRows.sort((a, b) => sortKey === 'n' ? b.n - a.n : sortKey === 'soon' ? b.soon - a.soon : a.rate - b.rate || b.n - a.n);
+  const watch = uRows.filter(u => u.n >= 5).sort((a, b) => a.rate - b.rate).slice(0, 5);
+  // ⑥ 人員名單（點單位、能階或狀態篩選）
+  const people = scoped.filter(r => (!F.unit || (r.dept || '（未註明）') === F.unit) && (!F.level || N_LEVEL(r.staff?.title) === F.level) && (!F.status || cls(r) === F.status)
+    && (!F.q || r.emp_id.toLowerCase().includes(F.q.toLowerCase()) || (r.staff?.name || '').includes(F.q)));
+  people.sort((a, b) => (a.dept || '').localeCompare(b.dept || '') || (a.ve || '9').localeCompare(b.ve || '9'));
+  const tag = (k, v) => v ? `<b>${esc(k)}</b> ${esc(v)}　<button class="btn-link" type="button" onclick="state.nf.${k === '單位' ? 'unit' : k === '能階' ? 'level' : 'status'}='';renderNursing()">✕</button>` : '';
+  $('content').innerHTML = `
+    <section class="card"><h3>護理部臨床教師認證概況</h3>
+      <div class="filters" style="align-items:center">
+        <div class="seg">${[['', '全部護理人員'], ['護理部', '護理部'], ['非護理部', '非護理部單位']].map(([v, s]) => `<button type="button" class="${F.area === v ? 'is-active' : ''}" onclick="state.nf.area='${v}';state.nf.unit='';renderNursing()">${s}</button>`).join('')}</div>
+        <button class="btn btn-ghost" type="button" onclick="nursingLink()">複製這頁的連結</button></div>
+      <p class="hint">依「執登職類＝護理」統計；資料每次同步自動更新（${esc(fmtTime(list[0].computed_at))}），不必再整理報表。認證率＝持有效臨床教師認證人數 ÷ 護理人員數。</p></section>
+    ${kpi}
+    <section class="card"><h3>認證狀態分布</h3>${band}</section>
+    <section class="cs-two">
+      <div class="card"><h3>各能階認證率</h3><p class="hint" style="margin:0 0 6px">點一列可在下方名單篩選。</p>${lvRows}</div>
+      <div class="card"><h3>需要關注的單位</h3><p class="hint" style="margin:0 0 6px">5 人以上單位中，認證率最低的 5 個。</p>
+        ${watch.map(u => `<button type="button" class="nb-row" onclick="state.nf.unit=${esc(JSON.stringify(u.u))};renderNursing();document.getElementById('nbList').scrollIntoView({behavior:'smooth'})">
+          <span class="nb-l" title="${esc(u.u)}">${esc(u.u)}</span><span class="nb-t low"><i style="width:${u.rate}%"></i></span><span class="num">${u.rate}%</span><small>${u.v} / ${u.n}</small></button>`).join('') || '<div class="empty">無</div>'}</div>
+    </section>
+    <section class="card"><h3>未來 24 個月到期人數</h3>${exp}<p class="hint">提前安排展延：到期當年需完成展延時數。</p></section>
+    <section class="card"><h3>各單位（${uRows.length} 個）</h3>
+      <div class="filters"><div class="seg">${[['rate', '認證率低→高'], ['n', '人數多→少'], ['soon', '即將到期多→少']].map(([v, s]) => `<button type="button" class="${sortKey === v ? 'is-active' : ''}" onclick="state.nfSort='${v}';renderNursing()">${s}</button>`).join('')}</div>
+        <button class="btn btn-ghost" type="button" id="nbUnitCsv">下載單位統計</button></div>
+      <div class="table-wrap nb-units"><table><thead><tr><th>單位</th><th>人數</th><th>有效認證</th><th>認證率</th><th>一年內到期</th><th>可提報</th><th>已過期</th></tr></thead><tbody>
+      ${uRows.map(u => `<tr><td><button class="btn-link" type="button" onclick="state.nf.unit=${esc(JSON.stringify(u.u))};renderNursing();document.getElementById('nbList').scrollIntoView({behavior:'smooth'})">${esc(u.u)}</button></td>
+        <td class="num">${u.n}</td><td class="num">${u.v}</td><td><div class="nb-cell"><span class="nb-t ${u.rate < 30 ? 'low' : ''}"><i style="width:${u.rate}%"></i></span><span class="num">${u.rate}%</span></div></td>
+        <td class="num">${u.soon || ''}</td><td class="num">${u.can || ''}</td><td class="num">${u.exp || ''}</td></tr>`).join('')}</tbody></table></div></section>
+    <section class="card" id="nbList"><h3>人員名單（${people.length} 人）</h3>
+      <div class="filters" style="align-items:center">
+        <select id="nbSt" style="width:auto"><option value="">所有狀態</option>${Object.keys(CLS).map(k => `<option value="${k}" ${F.status === k ? 'selected' : ''}>${CLS[k][0]}</option>`).join('')}</select>
+        <input id="nbQ" type="search" placeholder="員工編號或姓名" value="${esc(F.q)}" style="flex:1;min-width:160px">
+        <button class="btn btn-ghost" type="button" id="nbCsv">下載名單</button></div>
+      ${F.unit || F.level ? `<p class="hint">篩選：${tag('單位', F.unit)}${tag('能階', F.level)}</p>` : ''}
+      <div class="table-wrap"><table><thead><tr><th>員工編號</th><th>單位</th><th>職稱</th><th>狀態</th><th>效期至</th><th>教學點數</th><th>說明</th></tr></thead><tbody>
+      ${people.slice(0, 500).map(r => `<tr><td><button class="btn-link" type="button" onclick="go('person','${esc(r.emp_id)}')">${empLabel(r.emp_id)}</button></td><td>${esc(r.dept)}</td><td>${esc(r.staff?.title || '')}</td>
+        <td><span class="pill" style="background:${CLS[cls(r)][1]};color:${cls(r) === 'none' ? 'var(--text)' : '#fff'}">${CLS[cls(r)][0]}</span></td><td>${esc(r.valid_end || '')}</td>
+        <td class="num">${esc(r.teach)} / ${esc(r.need)}</td><td class="reason">${esc(r.reason)}</td></tr>`).join('') || '<tr><td colspan="7" class="empty">沒有符合的人員</td></tr>'}</tbody></table></div>
+      ${people.length > 500 ? '<p class="hint">畫面顯示前 500 人，完整名單請下載。</p>' : ''}</section>`;
+  $('nbSt').onchange = e => { F.status = e.target.value; renderNursing(); };
+  $('nbQ').onchange = e => { F.q = e.target.value.trim(); renderNursing(); };
+  $('nbCsv').onclick = () => download(`護理部認證名單_${today()}.csv`, [['員工編號', '姓名', '單位', '職稱', '能階', '狀態', '效期至', '教學點數', '應達', '說明'],
+    ...people.map(r => [r.emp_id, nameOf(r.emp_id), r.dept, r.staff?.title || '', N_LEVEL(r.staff?.title), CLS[cls(r)][0], r.valid_end || '', r.teach, r.need, r.reason])]);
+  $('nbUnitCsv').onclick = () => download(`護理部各單位認證率_${today()}.csv`, [['單位', '人數', '有效認證', '認證率(%)', '一年內到期', '可提報', '已過期'],
+    ...uRows.map(u => [u.u, u.n, u.v, u.rate, u.soon, u.can, u.exp])]);
+}
+async function nursingLink() {
+  const url = `${location.origin}${location.pathname}#nursing`;
+  try { await navigator.clipboard.writeText(url); toast('已複製連結：' + url); } catch (e) { prompt('請複製這個連結：', url); }
 }
 
 // ---------- 完成率：依身分（PGY、住院醫師、研究醫師、主治醫師、各醫事職類）看應完成的比例，勾選未完成者寄信提醒 ----------
