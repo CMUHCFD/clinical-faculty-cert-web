@@ -684,3 +684,9 @@ td input[type=checkbox], th input[type=checkbox] { width: 18px; height: 18px; ma
 .nb-cell { display: flex; align-items: center; gap: 8px; min-width: 140px; } .nb-cell .nb-t { flex: 1; }
 .nb-exp .cs-bars i.t { background: var(--warning); }
 .nb-units { max-height: 520px; overflow: auto; }
+/* ---------- 護理部專屬登入頁（#nursing）---------- */
+.auth-nursing { border-top: 6px solid var(--blk-pref, #D9668A); }
+.auth-nursing h1 small { display: block; font-size: 15px; font-weight: 600; color: var(--muted); margin-top: 4px; }
+.nur-hint { background: #FCEFF3; border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; font-size: 15px; }
+.nur-hint p { margin: 4px 0; }
+.nur-back { text-align: center; margin: 18px 0 0; }

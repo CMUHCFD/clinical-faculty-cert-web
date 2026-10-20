@@ -62,7 +62,33 @@ function showAuth(msg, ok) {
   setFab(null);
   $('appView').hidden = true; $('authView').hidden = false;
   $('authMsg').textContent = msg || ''; $('authMsg').className = 'msg' + (ok ? ' ok' : '');
+  authMode();
 }
+// 護理部專屬入口（…/#nursing）：登入頁改為護理部標題，只留登入與開通；一般同仁查詢進度的入口改成小連結
+function authMode() {
+  const nursing = location.hash === '#nursing';
+  const card = document.querySelector('.auth-card'); if (!card) return;
+  card.classList.toggle('auth-nursing', nursing);
+  const h1 = card.querySelector('h1');
+  if (!h1.dataset.orig) h1.dataset.orig = h1.textContent;
+  h1.innerHTML = nursing ? '護理部｜臨床教師認證概況<small>護理長、督導專用</small>' : esc(h1.dataset.orig);
+  document.title = nursing ? '護理部認證概況' : '臨床教師認證';
+  if ($('goLookup')) $('goLookup').hidden = nursing;
+  const or = card.querySelector('.or'); if (or) or.hidden = nursing;
+  let hint = $('nurHint');
+  if (nursing && !hint) {
+    hint = document.createElement('div'); hint.id = 'nurHint'; hint.className = 'nur-hint';
+    hint.innerHTML = '<p>請用<b>員工編號＋密碼</b>登入，登入後直接看到<b>您負責單位</b>的護理人員認證情形。</p><p>第一次使用：點上方「開通帳號」，輸入師培中心發給您的<b>開通碼</b>並自訂密碼。</p>';
+    $('authMain').insertBefore(hint, $('authMain').querySelector('.tabs'));
+    const back = document.createElement('p'); back.id = 'nurBack'; back.className = 'nur-back';
+    back.innerHTML = '<button class="btn-link" type="button">一般同仁：查詢自己的認證進度 →</button>';
+    back.querySelector('button').onclick = () => { history.replaceState(null, '', location.pathname); authMode(); setTab('lookup'); };
+    $('authMain').appendChild(back);
+  }
+  if (hint) hint.hidden = !nursing;
+  if ($('nurBack')) $('nurBack').hidden = !nursing;
+}
+window.addEventListener('hashchange', () => { if (!$('authView').hidden) authMode(); });
 // 登入頁兩條路：大按鈕「查詢我的認證進度」（免登入）／下方的登入、開通帳號
 function setTab(which) {
   const lookup = which === 'lookup';
