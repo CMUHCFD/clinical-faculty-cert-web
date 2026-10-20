@@ -624,7 +624,7 @@ async function boot() {
   // 護理部認證概況（取代 Power BI）：師培中心人員、護理職類管理人與護理部單位主管；護理主管放在第一個
   if (canNursing()) { if (isCfd()) views.splice(views.findIndex(v => v[0] === 'all') + 1, 0, ['nursing', '護理部概況']); else views.unshift(['nursing', '護理部概況']); }
   // 護理主管（護理長、督導）：只留教師概況、自己單位的師生比、醫事職類認證規範；職類管理人另有訓練計畫
-  if (nurseHead()) views.splice(0, views.length, ['nursing', '護理部概況'], ['ratio', '師生比'], ...(state.me.scope_profession ? [['plan', '訓練計畫']] : []), ['rules', '認證規範']);
+  if (nurseHead()) views.splice(0, views.length, ['nursing', '護理部概況'], ['ratio', '師生比'], ...(state.me.scope_profession && !(state.me.scope_units || []).length ? [['plan', '訓練計畫']] : []), ['rules', '認證規範']);
   logView('login');
   idleGuard();
   setFab(isCfd() ? null : 'login');   // 師培中心人員是處理反映的人，不顯示
@@ -2124,6 +2124,7 @@ async function renderNursing() {
   const cls = r => isValid(r) ? (r.ve <= in12 ? 'soon' : 'ok') : r.can_apply ? 'can' : r.status_code === 'expired' ? 'exp' : 'none';
   const CLS = { ok: ['認證有效', 'var(--success)'], soon: ['一年內到期', 'var(--warning)'], can: ['可提報認證', 'var(--secondary)'], exp: ['已過期（保留期）', 'var(--crimson)'], none: ['尚未認證', '#c9d3da'] };
   const area = r => (r.dept || '').startsWith('護理部') ? '護理部' : '非護理部';
+  const oneUnit = new Set(list.map(r => r.dept)).size === 1 ? list[0].dept : '';   // 單位主管只看自己單位
   const scoped = list.filter(r => (!F.area || area(r) === F.area));
   const rate = L => L.length ? Math.round(L.filter(isValid).length / L.length * 1000) / 10 : 0;
   const cnt = (L, k) => L.filter(r => cls(r) === k).length;
@@ -2158,9 +2159,9 @@ async function renderNursing() {
   state.nbCan = people.filter(canSubmit).map(r => r.emp_id);
   const tag = (k, v) => v ? `<b>${esc(k)}</b> ${esc(v)}　<button class="btn-link" type="button" onclick="state.nf.${k === '單位' ? 'unit' : k === '能階' ? 'level' : 'status'}='';renderNursing()">✕</button>` : '';
   $('content').innerHTML = `
-    <section class="card"><h3>護理部臨床教師認證概況</h3>
-      <div class="filters" style="align-items:center">
-        <div class="seg">${[['', '全部護理人員'], ['護理部', '護理部'], ['非護理部', '非護理部單位']].map(([v, s]) => `<button type="button" class="${F.area === v ? 'is-active' : ''}" onclick="state.nf.area='${v}';state.nf.unit='';renderNursing()">${s}</button>`).join('')}</div></div>
+    <section class="card"><h3>${oneUnit ? `${esc(oneUnit)}｜臨床教師認證概況` : '護理部臨床教師認證概況'}</h3>
+      ${oneUnit ? '' : `<div class="filters" style="align-items:center">
+        <div class="seg">${[['', '全部護理人員'], ['護理部', '護理部'], ['非護理部', '非護理部單位']].map(([v, s]) => `<button type="button" class="${F.area === v ? 'is-active' : ''}" onclick="state.nf.area='${v}';state.nf.unit='';renderNursing()">${s}</button>`).join('')}</div></div>`}
       <p class="hint">依「執登職類＝護理」統計；資料每次同步自動更新（${esc(fmtTime(list[0].computed_at))}），不必再整理報表。認證率＝持有效臨床教師認證人數 ÷ 護理人員數。</p></section>
     ${kpi}
     <section class="card"><h3>認證狀態分布</h3>${band}</section>
