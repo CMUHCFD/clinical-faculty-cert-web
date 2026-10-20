@@ -78,7 +78,7 @@ function authMode() {
   let hint = $('nurHint');
   if (nursing && !hint) {
     hint = document.createElement('div'); hint.id = 'nurHint'; hint.className = 'nur-hint';
-    hint.innerHTML = '<p>請用<b>員工編號＋密碼</b>登入，登入後直接看到<b>您負責單位</b>的護理人員認證情形。</p><p>第一次使用：點上方「開通帳號」，輸入師培中心發給您的<b>開通碼</b>並自訂密碼。</p>';
+    hint.innerHTML = '<p>請用<b>員工編號＋密碼</b>登入，登入後直接看到<b>您負責單位</b>的護理人員認證情形。</p><p>第一次使用或忘記密碼：點上方「開通帳號／忘記密碼」，輸入<b>員工編號＋身分證字號</b>，再自訂密碼即可。</p>';
     $('authMain').insertBefore(hint, $('authMain').querySelector('.tabs'));
     const back = document.createElement('p'); back.id = 'nurBack'; back.className = 'nur-back';
     back.innerHTML = '<button class="btn-link" type="button">一般同仁：查詢自己的認證進度 →</button>';
@@ -86,6 +86,7 @@ function authMode() {
     $('authMain').appendChild(back);
   }
   if (hint) hint.hidden = !nursing;
+  setActWay(state.actWay || 'id');
   if ($('nurBack')) $('nurBack').hidden = !nursing;
 }
 window.addEventListener('hashchange', () => { if (!$('authView').hidden) authMode(); });
@@ -360,6 +361,19 @@ async function signIn(emp, password) {
   await boot();
 }
 $('loginForm').onsubmit = e => { e.preventDefault(); signIn($('loginEmp').value, $('loginPw').value); };
+// 開通／忘記密碼：員工編號＋身分證字號（預設）；名冊沒有證號資料者改用師培中心發的開通碼
+function setActWay(way) {
+  state.actWay = way === 'code' ? 'code' : 'id';
+  if (!$('actIdL')) return;
+  const code = state.actWay === 'code';
+  $('actIdL').hidden = code; $('actCodeL').hidden = !code;
+  $('actId').required = !code; $('actCode').required = code;
+  $('actHint').textContent = code
+    ? '請輸入師培中心發給您的一次性開通碼，並自訂密碼。'
+    : '第一次使用或忘記密碼：輸入員工編號與身分證字號，再自訂密碼即可。';
+  $('wayToggle').textContent = code ? '改用員工編號＋身分證字號' : '名冊沒有我的證號資料？改用師培中心發的開通碼';
+}
+if ($('wayToggle')) $('wayToggle').onclick = () => setActWay(state.actWay === 'code' ? 'id' : 'code');
 $('activateForm').onsubmit = async e => {
   e.preventDefault();
   const emp = $('actEmp').value.trim(), pw = $('actPw').value;
@@ -369,7 +383,7 @@ $('activateForm').onsubmit = async e => {
     const res = await fetch(`${window.APP_CONFIG.url}/functions/v1/activate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', apikey: window.APP_CONFIG.anonKey, Authorization: `Bearer ${window.APP_CONFIG.anonKey}` },
-      body: JSON.stringify({ emp_id: emp, code: $('actCode').value, password: pw })
+      body: JSON.stringify(state.actWay === 'code' ? { emp_id: emp, code: $('actCode').value, password: pw } : { emp_id: emp, national_id: $('actId').value.trim().toUpperCase(), password: pw })
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.success) return showAuth(data.message || '開通失敗，請稍後再試或洽師培中心。');
