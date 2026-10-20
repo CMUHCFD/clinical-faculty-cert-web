@@ -571,7 +571,7 @@ async function boot() {
   go(views[0][0]);
 }
 const canNursing = () => isCfd() || (state.role === 'dept_coordinator' &&
-  (state.me.scope_profession === '護理' || String(state.me.scope_dept || state.me.dept || '').startsWith('護理部')));
+  (state.me.scope_profession === '護理' || state.me.profession === '護理' || String(state.me.scope_dept || state.me.dept || '').startsWith('護理部')));   // 護理長、護理主管（含兒童醫院、分院等護理單位）
 
 function go(view, arg) {
   clearInterval(state.qrTimer);
