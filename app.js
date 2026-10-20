@@ -2138,13 +2138,7 @@ async function renderNursing() {
   // ② 全體分布色帶
   const band = `<div class="nb-band">${Object.keys(CLS).map(k => { const v = cnt(scoped, k); return v ? `<i style="flex:${v};background:${CLS[k][1]}" title="${CLS[k][0]} ${v} 人"></i>` : ''; }).join('')}</div>
     <div class="legend">${Object.keys(CLS).map(k => `<span><i style="background:${CLS[k][1]}"></i>${CLS[k][0]} ${cnt(scoped, k)}</span>`).join('')}</div>`;
-  // ③ 能階
-  const lv = {}; scoped.forEach(r => { const k = N_LEVEL(r.staff?.title); (lv[k] = lv[k] || []).push(r); });
-  const LV_ORDER = ['N', 'N1', 'N2', 'N3', 'N4', 'NP', 'NP1', 'NP2', 'DN', '護理長', '督導', '其他'];
-  const levels = Object.entries(lv).sort((a, b) => LV_ORDER.indexOf(a[0]) - LV_ORDER.indexOf(b[0]));
-  const lvRows = levels.map(([k, L]) => `<button type="button" class="nb-row ${F.level === k ? 'on' : ''}" onclick="state.nf.level=state.nf.level===${esc(JSON.stringify(k))}?'':${esc(JSON.stringify(k))};renderNursing()">
-    <span class="nb-l">${esc(k)}</span><span class="nb-t"><i style="width:${rate(L)}%"></i></span><span class="num">${rate(L)}%</span><small>${L.filter(isValid).length} / ${L.length}</small></button>`).join('');
-  // ④ 到期月份（未來 24 個月）
+  // ③ 到期月份（未來 24 個月）
   const months = Array.from({ length: 24 }, (_, i) => { const d = new Date(`${t.slice(0, 7)}-01T00:00:00`); d.setMonth(d.getMonth() + i); return d.toISOString().slice(0, 7); });
   const byM = months.map(m => scoped.filter(r => isValid(r) && r.ve.startsWith(m)).length);
   const maxM = Math.max(1, ...byM);
@@ -2158,7 +2152,7 @@ async function renderNursing() {
   const watch = uRows.filter(u => u.n >= 5).sort((a, b) => a.rate - b.rate).slice(0, 5);
   // ⑥ 人員名單（點單位、能階或狀態篩選）
   const stOk = r => !F.status || (F.status === 'submit' ? canSubmit(r) : F.status === 'pend' ? pending.has(r.emp_id) : cls(r) === F.status);
-  const people = scoped.filter(r => (!F.unit || (r.dept || '（未註明）') === F.unit) && (!F.level || N_LEVEL(r.staff?.title) === F.level) && stOk(r)
+  const people = scoped.filter(r => (!F.unit || (r.dept || '（未註明）') === F.unit) && stOk(r)
     && (!F.q || r.emp_id.toLowerCase().includes(F.q.toLowerCase()) || (r.staff?.name || '').includes(F.q)));
   people.sort((a, b) => (a.dept || '').localeCompare(b.dept || '') || (a.ve || '9').localeCompare(b.ve || '9'));
   state.nbCan = people.filter(canSubmit).map(r => r.emp_id);
@@ -2166,17 +2160,13 @@ async function renderNursing() {
   $('content').innerHTML = `
     <section class="card"><h3>護理部臨床教師認證概況</h3>
       <div class="filters" style="align-items:center">
-        <div class="seg">${[['', '全部護理人員'], ['護理部', '護理部'], ['非護理部', '非護理部單位']].map(([v, s]) => `<button type="button" class="${F.area === v ? 'is-active' : ''}" onclick="state.nf.area='${v}';state.nf.unit='';renderNursing()">${s}</button>`).join('')}</div>
-        <button class="btn btn-ghost" type="button" onclick="nursingLink()">複製這頁的連結</button></div>
+        <div class="seg">${[['', '全部護理人員'], ['護理部', '護理部'], ['非護理部', '非護理部單位']].map(([v, s]) => `<button type="button" class="${F.area === v ? 'is-active' : ''}" onclick="state.nf.area='${v}';state.nf.unit='';renderNursing()">${s}</button>`).join('')}</div></div>
       <p class="hint">依「執登職類＝護理」統計；資料每次同步自動更新（${esc(fmtTime(list[0].computed_at))}），不必再整理報表。認證率＝持有效臨床教師認證人數 ÷ 護理人員數。</p></section>
     ${kpi}
     <section class="card"><h3>認證狀態分布</h3>${band}</section>
-    <section class="cs-two">
-      <div class="card"><h3>各能階認證率</h3><p class="hint" style="margin:0 0 6px">點一列可在下方名單篩選。</p>${lvRows}</div>
-      <div class="card"><h3>需要關注的單位</h3><p class="hint" style="margin:0 0 6px">5 人以上單位中，認證率最低的 5 個。</p>
+    ${uRows.length > 1 ? `<section class="card"><h3>需要關注的單位</h3><p class="hint" style="margin:0 0 6px">5 人以上單位中，認證率最低的 5 個；點一下看名單。</p>
         ${watch.map(u => `<button type="button" class="nb-row" onclick="state.nf.unit=${esc(JSON.stringify(u.u))};renderNursing();document.getElementById('nbList').scrollIntoView({behavior:'smooth'})">
-          <span class="nb-l" title="${esc(u.u)}">${esc(u.u)}</span><span class="nb-t low"><i style="width:${u.rate}%"></i></span><span class="num">${u.rate}%</span><small>${u.v} / ${u.n}</small></button>`).join('') || '<div class="empty">無</div>'}</div>
-    </section>
+          <span class="nb-l" title="${esc(u.u)}">${esc(u.u)}</span><span class="nb-t low"><i style="width:${u.rate}%"></i></span><span class="num">${u.rate}%</span><small>${u.v} / ${u.n}</small></button>`).join('') || '<div class="empty">無</div>'}</section>` : ''}
     <section class="card"><h3>未來 24 個月到期人數</h3>${exp}<p class="hint">提前安排展延：到期當年需完成展延時數。</p></section>
     <section class="card"><h3>各單位（${uRows.length} 個）</h3>
       <div class="filters"><div class="seg">${[['rate', '認證率低→高'], ['n', '人數多→少'], ['soon', '即將到期多→少']].map(([v, s]) => `<button type="button" class="${sortKey === v ? 'is-active' : ''}" onclick="state.nfSort='${v}';renderNursing()">${s}</button>`).join('')}</div>
@@ -2190,7 +2180,7 @@ async function renderNursing() {
         <select id="nbSt" style="width:auto"><option value="">所有狀態</option><option value="submit" ${F.status === 'submit' ? 'selected' : ''}>可提報（尚未送出）</option><option value="pend" ${F.status === 'pend' ? 'selected' : ''}>已提報・審核中</option>${Object.keys(CLS).map(k => `<option value="${k}" ${F.status === k ? 'selected' : ''}>${CLS[k][0]}</option>`).join('')}</select>
         <input id="nbQ" type="search" placeholder="員工編號或姓名" value="${esc(F.q)}" style="flex:1;min-width:160px">
         <button class="btn btn-ghost" type="button" id="nbCsv">下載名單</button></div>
-      ${F.unit || F.level ? `<p class="hint">篩選：${tag('單位', F.unit)}${tag('能階', F.level)}</p>` : ''}
+      ${F.unit ? `<p class="hint">篩選：${tag('單位', F.unit)}</p>` : ''}
       ${people.some(canSubmit) ? `<div class="nb-submit"><span>已勾選 <b id="nbSelN">${state.nbSel.size}</b> 人</span>
         <button class="btn btn-ghost" type="button" onclick="nbSelAll()">勾選名單中可提報的 ${people.filter(canSubmit).length} 人</button>
         <button class="btn btn-primary" type="button" onclick="nbSubmit()">提報給師培中心審核</button>
@@ -2224,10 +2214,6 @@ async function nbSubmit() {
   state.nbSel = new Set(); state.list = null;
   toast(`已提報 ${okN} 人給師培中心審核${bad.length ? `；${bad.length} 人未送出：${bad.slice(0, 3).join('；')}${bad.length > 3 ? '…' : ''}` : ''}`, !bad.length);
   renderNursing();
-}
-async function nursingLink() {
-  const url = `${location.origin}${location.pathname}#nursing`;
-  try { await navigator.clipboard.writeText(url); toast('已複製連結：' + url); } catch (e) { prompt('請複製這個連結：', url); }
 }
 
 // ---------- 完成率：依身分（PGY、住院醫師、研究醫師、主治醫師、各醫事職類）看應完成的比例，勾選未完成者寄信提醒 ----------
