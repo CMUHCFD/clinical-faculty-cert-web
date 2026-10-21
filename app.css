@@ -713,3 +713,11 @@ td.warn { color: var(--crimson); font-weight: 700; }
 .ap-req li.met { background: #eaf7f3; } .ap-req b { white-space: nowrap; }
 .ap-ok { background: #eaf7f3; color: #2c8a78; border-radius: 10px; padding: 10px 12px; font-weight: 700; margin: 12px 0 4px; }
 #applyDlg { max-width: 520px; width: calc(100% - 32px); }
+.sv-cert { width: 100%; margin-top: 10px; font-size: 16px; padding: 12px; }
+
+/* ---------- 官方教師認證證明（衛福部） ---------- */
+.pec-box { margin-top: 14px; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; background: #f8fbfd; }
+.pec-box > b { font-size: 16px; color: var(--primary-dark); }
+.pec-box ol { margin: 6px 0 8px; padding-left: 22px; font-size: 15px; } .pec-box li { margin: 2px 0; }
+.pec-btns { display: flex; flex-wrap: wrap; gap: 8px; } .pec-btns .btn { width: auto; text-decoration: none; }
+.pec-box small { display: block; color: var(--muted); margin-top: 6px; }

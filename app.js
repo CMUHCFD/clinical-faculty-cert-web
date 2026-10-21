@@ -277,6 +277,68 @@ function toggleView(btn) {
   try { localStorage.setItem('cfdView', show ? 'full' : 'simple'); } catch (e) { /* 無法記住也沒關係 */ }
   if (show) more.scrollIntoView({ behavior: 'smooth' });
 }
+// ---------- 官方教師認證證明：連到衛福部臨床醫事人員培訓計畫管理系統，本人輸入身分證字號與姓名後下載 ----------
+//   身分證字號不經過本系統（雲端沒有、也不放進網址）；只提供「複製姓名」
+const PEC_QUERY_URL = 'https://pec.mohw.gov.tw/QueryTeacherCertification';
+function pecCertBox(name) {
+  const full = name && !/○/.test(name) ? name : '';   // 免登入查詢的姓名是遮罩過的，不提供複製
+  return `<div class="pec-box"><b>列印官方教師認證證明</b>
+    <ol><li>按下方按鈕開啟衛福部「師資認證查詢」</li><li>輸入<b>身分證字號</b>與<b>姓名</b>，按「查詢」</li><li>按「下載認證證明」即可存成 PDF</li></ol>
+    <div class="pec-btns"><a class="btn btn-primary" href="${PEC_QUERY_URL}" target="_blank" rel="noopener noreferrer">到衛福部列印證明 ↗</a>
+      ${full ? `<button class="btn btn-ghost" type="button" onclick="copyText(${esc(JSON.stringify(full))}, '已複製姓名，到衛福部頁面貼上即可')">複製我的姓名</button>` : ''}</div>
+    <small>證明由醫策會系統產生；身分證字號請自行輸入，本系統不會傳送。</small></div>`;
+}
+async function copyText(text, msg) {
+  try { await navigator.clipboard.writeText(text); toast(msg || '已複製'); } catch (e) { prompt('請複製：', text); }
+}
+
+// ---------- 本院臨床教師認證證書（預設關閉：rules.certificate.enabled；文字待確認）----------
+// 文字設定在 rules.certificate；院長簽名圖檔刻意不放（網站檔案可公開取得）
+function printCert() {
+  const C = state.certCtx || {}, d = C.d || {}, cert = d.activeCertificate, s = C.staff || {};
+  if (!cert) return toast('目前沒有有效的臨床教師認證', false);
+  const R = (state.rules && state.rules.certificate) || {};
+  const roc = x => { const [y, m, dd] = x.split('-').map(Number); return `中華民國 ${y - 1911} 年 ${m} 月 ${dd} 日`; };
+  const prof = s.profession || (d.identity && d.identity.name) || '';
+  const no = (R.number_format || '（{roc}）院教師字第{emp}{mm}號').replace('{roc}', Number(cert.valid_start.slice(0, 4)) - 1911).replace('{emp}', s.emp_id || state.me.emp_id).replace('{mm}', cert.valid_start.slice(5, 7));
+  const body = (R.body || '經審查符合臨床教師資格，特此證明。').replace('{prof}', prof);
+  const logo = new URL('logo.png', location.href).href;
+  const w = window.open('', '_blank');
+  if (!w) return toast('瀏覽器擋住了新視窗，請允許本網站開啟彈出視窗後再試一次。', false);
+  w.document.write(`<!doctype html><html lang="zh-Hant-TW"><head><meta charset="utf-8"><title>${esc(R.title || '臨床教師認證證書')}_${esc(s.name || '')}</title>
+<style>
+  @page { size: A4 landscape; margin: 0; }
+  * { box-sizing: border-box; } html, body { margin: 0; background: #e9eef2; font-family: "DFKai-SB","BiauKai","標楷體","Noto Serif TC",serif; color: #1f2d36; }
+  .bar { font-family: system-ui, sans-serif; text-align: center; padding: 12px; } .bar button { font-size: 16px; padding: 8px 18px; margin: 0 6px; cursor: pointer; }
+  .page { width: 297mm; height: 210mm; margin: 0 auto 20px; background: #fff; position: relative; padding: 14mm; }
+  .frame { position: absolute; inset: 10mm; border: 3px double #164661; } .frame2 { position: absolute; inset: 13mm; border: 1px solid #c9a227; }
+  .in { position: relative; height: 100%; display: flex; flex-direction: column; align-items: center; text-align: center; padding: 10mm 22mm 8mm; }
+  .no { position: absolute; top: 6mm; right: 10mm; font-size: 13pt; }
+  .logo { height: 16mm; margin-top: 2mm; }
+  h1 { font-size: 34pt; letter-spacing: .5em; margin: 6mm 0 0 .5em; color: #164661; } .en { font-family: Georgia, serif; font-size: 13pt; letter-spacing: .2em; color: #6b7a86; margin-top: 1mm; }
+  .who { font-size: 22pt; margin-top: 10mm; } .who b { font-size: 30pt; letter-spacing: .2em; margin: 0 4mm; border-bottom: 1px solid #1f2d36; padding: 0 4mm; }
+  .body { font-size: 18pt; line-height: 1.9; margin-top: 6mm; max-width: 220mm; }
+  .valid { font-size: 18pt; margin-top: 4mm; } .valid b { color: #164661; }
+  .sign { position: absolute; right: 30mm; bottom: 26mm; font-size: 20pt; letter-spacing: .3em; }
+  .date { position: absolute; left: 0; right: 0; bottom: 12mm; font-size: 16pt; letter-spacing: .3em; }
+  .foot { position: absolute; left: 18mm; bottom: 3mm; font-family: system-ui, sans-serif; font-size: 8pt; color: #8a98a3; text-align: left; }
+  @media print { html, body { background: #fff; } .bar { display: none; } .page { margin: 0; } }
+</style></head><body>
+<div class="bar"><button onclick="print()">列印／另存為 PDF</button><button onclick="close()">關閉</button><div style="font-size:13px;color:#666;margin-top:6px">在列印視窗的「目的地」選「另存為 PDF」即可下載；請選擇「橫向」、邊界「無」。</div></div>
+<div class="page"><div class="frame"></div><div class="frame2"></div><div class="in">
+  <div class="no">證書字號：${esc(no)}</div>
+  <img class="logo" src="${logo}" alt="">
+  <h1>${esc(R.title || '臨床教師認證證書')}</h1><div class="en">CERTIFICATE OF CLINICAL TEACHER</div>
+  <div class="who">茲證明<b>${esc(s.name || '')}</b>（員工編號 ${esc(s.emp_id || state.me.emp_id)}）</div>
+  <div class="body">${esc(body)}</div>
+  <div class="valid">認證效期：自 <b>${esc(roc(cert.valid_start).replace('中華民國 ', ''))}</b> 起至 <b>${esc(roc(cert.valid_end).replace('中華民國 ', ''))}</b> 止</div>
+  <div class="sign">${esc(R.org || '中國醫藥大學附設醫院')}<br>${esc(R.signer_title || '院長')}　${esc(R.signer_name || '')}</div>
+  <div class="date">${esc(roc(cert.valid_start))}</div>
+  <div class="foot">認證資料以衛生福利部臨床醫事人員培訓計畫管理系統登錄為準（師資培育認證機構代碼 ${esc(R.pec_code || '')}）。本證書由臨床教師認證系統產生，列印時間 ${esc(new Date().toLocaleString('zh-TW', { hour12: false }))}。</div>
+</div></div></body></html>`);
+  w.document.close();
+}
+
 // 本人申請臨床教師認證：確認畫面（院外時數、備註選填）→ 送到師培中心「審查」
 function openApply(track) {
   let dlg = $('applyDlg');
@@ -382,6 +444,8 @@ function simpleView(d, o = {}) {
         ? `<button class="btn btn-primary sv-apply" type="button" onclick="openApply('${d.trackType}')">申請臨床教師認證（${d.trackType === 'renewal' ? '展延' : '新增'}）</button>`
         : `<p class="sv-alt"><button class="btn-link" type="button" onclick="openApply('${d.trackType}')">有院外師資培育時數？仍可提出申請 →</button></p>`) : ''}
       ${certTrack && !pending && eligible && o.lookup ? '<button class="btn btn-primary sv-apply" type="button" onclick="endLookup();setTab(\'login\')">登入後申請</button>' : ''}
+      ${certTrack && (cert || d.lastCertificate) && (o.self || o.lookup) ? pecCertBox(o.name) : ''}
+      ${certTrack && o.self && cert && cert.source !== 'external' && ((state.rules || {}).certificate || {}).enabled ? '<button class="btn btn-ghost sv-cert" type="button" onclick="printCert()">列印本院臨床教師證書</button>' : ''}
     </section>${route}
     <button class="btn btn-ghost sv-toggle" type="button" onclick="toggleView(this)">${simpleMode() ? '看詳細資料 ▼' : '收起詳細資料 ▲'}</button>`;
 }
@@ -1265,7 +1329,7 @@ function personHTML(o) {
     + block('records', appList + recs);   // 結論 → 我的身分要完成什麼 → 下一步 → 細節
   const fb = own && !o.lookup && !o.admin ? feedbackCard('login') : '';
   if (!simple) return full + fb;
-  if (own && !o.lookup) state.applyCtx = { d, dl: row.detail, dn: row.detail_new, regime: o.regime };   // 申請視窗用：效期試算、時數概況
+  if (own && !o.lookup) { state.applyCtx = { d, dl: row.detail, dn: row.detail_new, regime: o.regime }; state.certCtx = { d, staff: { ...(staff || {}), emp_id: empId } }; }   // 申請視窗、證書列印用
   return simpleView(d, { records, apps, regime: o.regime, name: staff?.name || '', self: own && !o.lookup }) + `<div class="lk-more" ${simpleMode() ? 'hidden' : ''}>${full}</div>` + fb;
 }
 
