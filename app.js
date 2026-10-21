@@ -1891,7 +1891,7 @@ async function renderCourseStats() {
   // 資料列權限：最高管理者看全部；其他人只看得到自己擔任承辦人的課程
   const raw = await fetchAll(() => sb.from('course_stats').select('*').order('course_date'));
   const all = raw.map(x => ({ c: x.cat, t: x.title, d: x.course_date, o: x.org, by: x.by_org, f: x.form || '', io: x.inout || '', h: Number(x.hours) || 0, p: x.passed, pr: x.prof || {}, orgz: x.organizer_names || '',
-    s: x.satisfaction == null ? null : Number(x.satisfaction), sc: x.avg_score == null ? null : Number(x.avg_score), pass: x.pass_rate == null ? null : Number(x.pass_rate) }));
+    s: x.satisfaction == null ? null : Number(x.satisfaction), sc: x.avg_score == null ? null : Number(x.avg_score), pass: x.pass_rate == null ? null : Number(x.pass_rate), it: x.item || '' }));
   if (!all.length) { $('content').innerHTML = `<div class="card empty">${state.role === 'super_admin' ? '尚無課程辦理資料，請執行同步（node tools/sync-up.js）。' : '目前沒有您擔任承辦人的一般醫學或教學能力提升課程。'}</div>`; return; }
   const years = [...new Set(all.map(c => c.d.slice(0, 4)))].sort().reverse();
   const f = state.cs = state.cs || { year: years[0], cat: '', by: '', q: '' };
@@ -1947,13 +1947,14 @@ async function renderCourseStats() {
         <h3 style="margin-top:16px">課程形式</h3>
         ${forms.map(([k, v]) => `<div class="cs-form"><span>${esc(k)}</span><b class="num">${v.n}</b> 門・<b class="num">${v.p.toLocaleString()}</b> 人次</div>`).join('')}</div>
     </section>
+    ${f.cat !== 'teaching' ? genItemCard(rows.filter(c => c.c === 'general')) : ''}
     ${satCard(rows)}
     <section class="card"><h3>通過人次最多的 10 門課</h3><div class="table-wrap"><table><thead><tr><th>日期</th><th>類別</th><th>課程名稱</th><th>開課單位</th><th>形式</th><th>通過人次</th></tr></thead><tbody>
       ${top.map(c => `<tr><td>${esc(c.d)}</td><td>${CAT_NAME[c.c]}</td><td style="white-space:normal">${esc(c.t)}</td><td>${esc(c.o)}</td><td>${esc(c.f)}</td><td class="num"><b>${c.p.toLocaleString()}</b></td></tr>`).join('')}</tbody></table></div></section>
     <section class="card"><h3>課程清單（${listRows.length} 門）</h3>
       <div class="filters"><input id="csQ" type="search" placeholder="搜尋課程名稱或開課單位" value="${esc(f.q)}" style="flex:1"><button class="btn btn-ghost" type="button" id="csCsv">下載 CSV</button></div>
       <div class="table-wrap"><table><thead><tr><th>日期</th><th>類別</th><th>課程名稱</th><th>開課單位</th><th>承辦人</th><th>形式</th><th>認證時數</th><th>通過人次</th><th>滿意度</th><th>護理／醫師／醫事／其他</th></tr></thead><tbody>
-      ${listRows.slice(0, 300).map(c => `<tr><td>${esc(c.d)}</td><td>${CAT_NAME[c.c]}</td><td style="white-space:normal;min-width:200px">${esc(c.t)}</td><td>${esc(c.o)}</td><td style="white-space:normal">${esc(c.orgz)}</td><td>${esc(c.f)}</td><td class="num">${n(c.h)}</td><td class="num">${c.p.toLocaleString()}</td>
+      ${listRows.slice(0, 300).map(c => `<tr><td>${esc(c.d)}</td><td>${CAT_NAME[c.c]}${c.it ? `<br><small>${esc(c.it)}</small>` : ''}</td><td style="white-space:normal;min-width:200px">${esc(c.t)}</td><td>${esc(c.o)}</td><td style="white-space:normal">${esc(c.orgz)}</td><td>${esc(c.f)}</td><td class="num">${n(c.h)}</td><td class="num">${c.p.toLocaleString()}</td>
         <td class="num">${c.s == null ? '<small class="muted">未發問卷</small>' : `<span class="${c.s < 90 ? 'warn' : ''}">${n(c.s)}%</span>`}</td>
         <td class="num">${['護理', '醫師', '醫事', '其他'].map(k => (c.pr || {})[k] || 0).join('／')}</td></tr>`).join('')}</tbody></table></div>
       ${listRows.length > 300 ? '<p class="hint">畫面顯示前 300 門，完整清單請下載 CSV。</p>' : ''}</section>`;
@@ -1963,6 +1964,17 @@ async function renderCourseStats() {
     ...listRows.map(c => [c.d, CAT_NAME[c.c], c.t, c.o, c.by === 'cfd' ? '教學部辦' : '科部辦', c.orgz, c.f, c.io, n(c.h), c.p, c.s ?? '', c.pass ?? '', c.sc ?? '', ...['護理', '醫師', '醫事', '其他'].map(k => (c.pr || {})[k] || 0)])]);
 }
 
+// 一般醫學能力課程：11 個課程項目的課程數與通過人次（項目由本機同步時依課程類別／名稱歸類）
+const GENERAL_ITEMS = ['01.病人安全', '02.醫療品質', '03.醫病溝通', '04.醫學倫理', '05.醫事法規', '06.感染管制', '07.實證醫學', '08.病歷寫作', '09.資訊素養', '10.因應醫療環境變化概念課程', '11.其他經醫院認定合適之課程'];
+function genItemCard(rows) {
+  if (!rows.length || !rows.some(c => c.it)) return '';
+  const by = GENERAL_ITEMS.map(i => { const L = rows.filter(c => c.it === i); return { i, n: L.length, p: L.reduce((a, c) => a + c.p, 0) }; });
+  const maxP = Math.max(1, ...by.map(b => b.p));
+  return `<section class="card"><h3>一般醫學能力課程｜11 項分布</h3>
+    ${by.map(b => `<div class="cs-hbar"><span class="cs-hl" title="${esc(b.i)}">${esc(b.i)}</span><div class="cs-ht"><i style="width:${b.p / maxP * 100}%;background:var(--cs-g)"></i></div><span class="num">${b.p.toLocaleString()}<small>／${b.n} 門</small></span></div>`).join('')}
+    ${by.filter(b => !b.n).length ? `<p class="hint">今年還沒有開課的項目：${by.filter(b => !b.n).map(b => esc(b.i.slice(3))).join('、')}。</p>` : ''}
+    <div class="note">報表「課程類別」不在 11 項內的課程，依課程名稱自動歸類；歸類明細可看師培中心本機的「一般醫學課程歸類」清冊，需要更正時可人工指定。</div></section>`;
+}
 // 課程滿意度（教學系統「單位開課報表」的課程滿意度問卷 %）：發放率、平均、分布、面授／線上、教學部辦／科部辦、較低的課程
 function satCard(rows) {
   const n = v => Math.round((Number(v) || 0) * 10) / 10;
