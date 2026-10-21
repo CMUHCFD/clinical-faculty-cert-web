@@ -277,6 +277,51 @@ function toggleView(btn) {
   try { localStorage.setItem('cfdView', show ? 'full' : 'simple'); } catch (e) { /* 無法記住也沒關係 */ }
   if (show) more.scrollIntoView({ behavior: 'smooth' });
 }
+// ---------- 過渡時期圖解：舊證 →（舊制下一張）→ 第一張新制證書 → 之後每 4 年，逐年標出要做什麼 ----------
+// 只給持「舊制證書」（新制開始前生效）的醫事人員看；日期用與核准相同的算法（certPeriod）
+function transitionCard(d) {
+  const cert = d.activeCertificate || (d.renewal && d.renewal.inGrace ? d.lastCertificate : null);
+  state.rules = state.rules || {};
+  const R = state.rules, newFrom = ((R.regime || {}).new_from_year) || 2027;
+  if (!cert || !cert.valid_start || cert.valid_start >= `${newFrom}-01-01` || cert.source === 'external') return '';
+  const rocD = s => `${Number(s.slice(0, 4)) - 1911}/${Number(s.slice(5, 7))}/${Number(s.slice(8, 10))}`;
+  const toAd = s => { const p = s.split('/').map(Number); return `${p[0] + 1911}-${String(p[1]).padStart(2, '0')}-${String(p[2]).padStart(2, '0')}`; };
+  const segs = [{ kind: 'old', start: cert.valid_start, end: cert.valid_end, title: '現在的證書（舊制）', todo: '到期前 2 年內累計 8 點，就能展延' }];
+  let end = cert.valid_end;
+  const ruleStart = ((R.transition || {}).new_rule_cert_start) || `${newFrom}-01-01`;
+  const pL = certPeriod({ ve: end }, end.slice(0, 8) + '01', 'legacy');
+  if (toAd(pL.start) < ruleStart) {   // 下一張在新制適用日之前就生效：仍照舊制換一張 2 年證書
+    const p = pL;
+    segs.push({ kind: 'old2', start: toAd(p.start), end: toAd(p.end), title: '下一張（仍是舊制，2 年）', todo: '到期前 2 年內累計 8 點' });
+    end = toAd(p.end);
+  }
+  const p2 = certPeriod({ ve: end }, end.slice(0, 8) + '01', 'new');
+  const n1 = { kind: 'new', start: toAd(p2.start), end: toAd(p2.end), title: '第一張新制證書', todo: '每年 4 小時（其中進階 2 小時）' };
+  segs.push(n1);
+  const y0 = Number(segs[0].start.slice(0, 4)), y1 = Number(n1.end.slice(0, 4)), cy = Number(today().slice(0, 4));
+  const years = []; for (let y = y0; y <= y1; y++) years.push(y);
+  // 每一年：由哪張證書涵蓋、要做什麼
+  const cell = y => {
+    const inSeg = segs.filter(s => Number(s.start.slice(0, 4)) <= y && Number(s.end.slice(0, 4)) >= y);
+    const s = inSeg[inSeg.length - 1];
+    const isNew = s && s.kind === 'new';
+    const partial = isNew && Number(s.start.slice(0, 4)) === y && s.start.slice(5) !== '01-01';
+    const what = !s ? '' : !isNew ? '舊制累計' : partial ? '換新證・不另計' : counselYear(y) ? '4 小時（輔導年）' : '4 小時';
+    return `<div class="tr-y ${isNew ? (partial ? 'np' : 'nw') : 'od'} ${y === cy ? 'now' : ''}"><b>${y - 1911}</b><span>${what}</span>${y === cy ? '<i>今年</i>' : ''}</div>`;
+  };
+  const span = (Date.parse(n1.end) - Date.parse(segs[0].start)) || 1;
+  const pos = s => (Date.parse(s) - Date.parse(segs[0].start)) / span * 100;
+  const nowP = Math.max(0, Math.min(100, pos(today())));
+  return `<section class="card tr-card"><h3>你的證書怎麼換成新制</h3>
+    <div class="tr-bars">${segs.map(s => `<div class="tr-bar ${s.kind}" style="left:${pos(s.start)}%;width:${Math.max(2, pos(s.end) - pos(s.start))}%"><span>${s.kind === 'new' ? '新制' : '舊制'}</span></div>`).join('')}
+      <div class="tr-now" style="left:${nowP}%">${WALKER}</div></div>
+    <div class="tr-years" style="grid-template-columns:repeat(${years.length},1fr)">${years.map(cell).join('')}</div>
+    <ol class="tr-steps">${segs.map(s => `<li class="${s.kind}"><b>${esc(s.title)}</b>　${rocD(s.start)} – ${rocD(s.end)}<br><small>${esc(s.todo)}${s.kind === 'new' && s.start.slice(5) !== '01-01' ? `；${Number(s.start.slice(0, 4)) - 1911} 年只有幾個月，不另計時數` : ''}</small></li>`).join('')}
+      <li class="later"><b>之後每一張</b>　1/1 – 第 4 年 12/31（完整 4 年）<br><small>每年 4 小時，不能把多的時數挪到別年</small></li></ol>
+    <p class="hint">新證書從舊證書到期的隔天開始接上，中間不會斷。實際效期以師培中心核准為準。</p></section>`;
+}
+const counselYear = y => (((state.rules || {}).transition || {}).counseling_years || []).includes(y);
+
 // ---------- 官方教師認證證明：連到衛福部臨床醫事人員培訓計畫管理系統，本人輸入身分證字號與姓名後下載 ----------
 //   身分證字號不經過本系統（雲端沒有、也不放進網址）；只提供「複製姓名」
 const PEC_QUERY_URL = 'https://pec.mohw.gov.tw/QueryTeacherCertification';
@@ -446,7 +491,7 @@ function simpleView(d, o = {}) {
       ${certTrack && !pending && eligible && o.lookup ? '<button class="btn btn-primary sv-apply" type="button" onclick="endLookup();setTab(\'login\')">登入後申請</button>' : ''}
       ${certTrack && (cert || d.lastCertificate) && (o.self || o.lookup) ? pecCertBox(o.name) : ''}
       ${certTrack && o.self && cert && cert.source !== 'external' && ((state.rules || {}).certificate || {}).enabled ? '<button class="btn btn-ghost sv-cert" type="button" onclick="printCert()">列印本院臨床教師證書</button>' : ''}
-    </section>${route}
+    </section>${certTrack ? transitionCard(d) : ''}${route}
     <button class="btn btn-ghost sv-toggle" type="button" onclick="toggleView(this)">${simpleMode() ? '看詳細資料 ▼' : '收起詳細資料 ▲'}</button>`;
 }
 function endLookup() {
