@@ -734,3 +734,8 @@ td.warn { color: var(--crimson); font-weight: 700; }
 .tr-steps { margin: 14px 0 6px; padding-left: 22px; } .tr-steps li { margin: 6px 0; } .tr-steps small { color: var(--muted); }
 .tr-steps li.new b { color: #1f6f5f; } .tr-steps li.later b { color: var(--muted); }
 @media (max-width: 720px) { .tr-y span { font-size: 10px; } .tr-y b { font-size: 13px; } }
+/* ---------- 線上反映回覆 ---------- */
+.fb-reply { display: grid; gap: 6px; margin-top: 8px; } .fb-reply textarea { width: 100%; font: inherit; }
+.fb-reply-btns { display: flex; gap: 8px; justify-content: flex-end; } .fb-reply-btns .btn { width: auto; }
+.fb-replied { margin-top: 6px; background: #eaf7f3; border-radius: 8px; padding: 8px 10px; } .fb-replied small { display: block; color: var(--muted); }
+.nav-badge { display: inline-block; min-width: 18px; padding: 0 5px; margin-left: 4px; border-radius: 9px; background: var(--crimson); color: #fff; font-size: 12px; line-height: 18px; text-align: center; }

@@ -783,6 +783,7 @@ async function boot() {
   $('nav').innerHTML = views.map(([v, t]) => `<button type="button" data-view="${v}">${t}</button>`).join('');
   if ($('empSearch')) $('empSearch').hidden = !(isCfd() || state.role === 'dept_coordinator');
   $('nav').querySelectorAll('button').forEach(b => { b.onclick = () => go(b.dataset.view); });
+  if (isCfd()) navBadge();
 
   // 掃描簽到 QR 進來的連結：登入後直接完成簽到
   const params = new URLSearchParams(location.search);
@@ -1230,6 +1231,7 @@ async function renderPerson(empId, back) {
       () => { state.list = null; renderPerson(empId, back); });
   };
   if ($('trfForm')) $('trfForm').onsubmit = e => { e.preventDefault(); submitTransfer(empId, () => { state.list = null; renderPerson(empId, back); }); };
+  if (own) loadMyFeedback();
 }
 
 // 教學醫院年資採認（管理者）：人事資料離職再到職、留職停薪後只顯示最新到職日，系統算出的年資可能偏低
@@ -1676,8 +1678,29 @@ function setFab(mode) {
   b.onclick = mode ? () => openFeedback(mode) : null;
 }
 const feedbackCard = mode => `<section class="card fb-card"><div><b>有問題要反映或諮詢？</b><br><small>例如時數沒有列入、認證狀態有疑問。填寫後師培中心會與您聯絡。</small></div>
-  <button class="btn btn-primary" style="width:auto" type="button" onclick="openFeedback('${mode}')">問題反映／諮詢</button></section>`;
+  <button class="btn btn-primary" style="width:auto" type="button" onclick="openFeedback('${mode}')">問題反映／諮詢</button></section>
+  ${mode === 'login' ? '<div id="myFb"></div>' : ''}`;
+// 登入者：顯示自己送出的反映與師培中心的回覆
+async function loadMyFeedback() {
+  const box = $('myFb'); if (!box) return;
+  let items = [];
+  try { items = (await api('feedback.mine')).items || []; } catch (e) { return; }
+  if (!items.length) return;
+  const when = t => new Date(t).toLocaleString('zh-TW', { hour12: false, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  box.innerHTML = `<section class="card"><h3>我的反映</h3><ul class="fb-list">${items.map(x => `<li class="fb-item ${x.reply ? '' : 'pend'}">
+    <div class="fb-top"><span class="pill ${x.status === '已回覆' ? 'valid' : 'expiring'}">${x.status === '已回覆' ? '已回覆' : '處理中'}</span><small>${when(x.created_at)}</small></div>
+    <div class="fb-msg">${x.category ? `<span class="org-tag dept">${esc(x.category)}</span> ` : ''}${esc(x.message)}</div>
+    ${x.reply ? `<div class="fb-replied"><b>師培中心回覆：</b>${esc(x.reply)}${x.handled_at ? `<small>${when(x.handled_at)}</small>` : ''}</div>` : ''}</li>`).join('')}</ul></section>`;
+}
 
+// 選單「來電紀錄」旁顯示待處理的線上反映數（師培中心人員）
+async function navBadge() {
+  try {
+    const { count } = await sb.from('feedback').select('id', { count: 'exact', head: true }).eq('status', '待處理');
+    const b = document.querySelector('#nav button[data-view="calls"]');
+    if (b) { b.querySelector('.nav-badge')?.remove(); if (count) b.insertAdjacentHTML('beforeend', `<span class="nav-badge" title="待處理的線上反映">${count}</span>`); }
+  } catch (e) { /* 讀不到時不顯示 */ }
+}
 // 師培中心處理線上反映
 async function feedbackInbox() {
   const { data, error } = await sb.from('feedback').select('*, who:staff!feedback_emp_id_fkey(dept)').order('created_at', { ascending: false }).limit(200);
@@ -1689,14 +1712,21 @@ async function feedbackInbox() {
   const item = x => `<li class="fb-item ${x.status === '待處理' ? 'pend' : ''}"><div class="fb-top"><b>${esc(x.name)}</b> ${esc(x.emp_id)}｜${esc(x.who?.dept || '')}｜☎ <b>${esc(x.phone)}</b>${x.contact_time ? `（${esc(x.contact_time)}）` : ''}
       <span class="pill ${x.status === '待處理' ? 'expiring' : 'valid'}">${esc(x.status)}</span><small>${when(x.created_at)}・${x.source === 'lookup' ? '免登入查詢' : '登入後'}</small></div>
     <div class="fb-msg">${x.category ? `<span class="org-tag dept">${esc(x.category)}</span> ` : ''}${esc(x.message)}</div>
-    ${x.status === '待處理' ? `<div class="filters"><input id="fbR-${Number(x.id)}" placeholder="處理說明（選填）" style="flex:1"><button class="btn btn-ghost" type="button" onclick="go('person','${esc(x.emp_id)}')">看個人頁</button>
-      <button class="btn btn-primary" style="width:auto" type="button" onclick="feedbackDone(${Number(x.id)})">已回覆</button></div>` : (x.reply ? `<small>處理說明：${esc(x.reply)}</small>` : '')}</li>`;
+    ${x.status === '待處理'
+      ? `<div class="fb-reply"><textarea id="fbR-${Number(x.id)}" rows="2" maxlength="2000" placeholder="回覆內容（同仁登入後在「我的認證」看得到；已電話回覆也可簡單註記）"></textarea>
+        <div class="fb-reply-btns"><button class="btn btn-ghost" type="button" onclick="go('person','${esc(x.emp_id)}')">看個人頁</button>
+        <button class="btn btn-primary" type="button" onclick="feedbackDone(${Number(x.id)})">送出回覆</button></div></div>`
+      : (x.reply ? `<div class="fb-replied">回覆：${esc(x.reply)}<small>${x.handled_at ? when(x.handled_at) : ''}${x.handled_by ? `・${esc(nameOf(x.handled_by) || x.handled_by)}` : ''}</small></div>` : '')}</li>`;
   return `<section class="card ${pend.length ? 'attention-card' : ''}"><h3>線上反映（待處理 ${pend.length}）</h3>
     ${list.length ? `<ul class="fb-list">${pend.map(item).join('')}</ul>
       ${list.length > pend.length ? `<details><summary>已回覆（${list.length - pend.length}）</summary><ul class="fb-list">${list.filter(x => x.status !== '待處理').slice(0, 50).map(item).join('')}</ul></details>` : ''}`
       : '<p class="hint" style="margin:0">尚無線上反映。同仁可在「免登入查詢」結果頁或「我的認證」頁按「問題反映／諮詢」填寫。</p>'}</section>`;
 }
-async function feedbackDone(id) { const d = await act('feedback.update', { id, status: '已回覆', reply: $(`fbR-${id}`) ? $(`fbR-${id}`).value : '' }); if (d) renderCalls(); }
+async function feedbackDone(id) {
+  const reply = $(`fbR-${id}`) ? $(`fbR-${id}`).value.trim() : '';
+  if (!reply && !confirm('沒有填寫回覆內容，仍要標記為已回覆嗎？')) return;
+  const d = await act('feedback.update', { id, status: '已回覆', reply }); if (d) { renderCalls(); navBadge(); }
+}
 
 // ---------- 使用紀錄（管理者）：誰在什麼時候登入、查看了誰、免登入查詢、資料異動 ----------
 const LOG_TYPES = { login: ['登入系統'], person: ['查看個人頁'], search: ['員工編號查詢'], lookup: ['免登入查詢'], notify: ['寄送提醒'] };
