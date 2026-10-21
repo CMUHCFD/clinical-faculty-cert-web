@@ -1362,12 +1362,16 @@ async function renderRules() {
   const rocY = y => Number(y) - 1911;
   const trans = !T.new_rule_cert_start ? '' : `<section class="card"><h3>新舊制轉換的過渡規定（醫事人員）</h3>
     <ol class="recs">
-      <li><b>效期一律到 12/31：</b>${(T.extend_to_year_end_years || []).map(rocY).join('、')} 年在年中到期的證書，效期延至到期當年 12/31（效期總長不超過四年，依醫策會作業程序「至多四年」），年底統一辦理展延，新證自次年 1/1 起四年。</li>
+      ${(T.extend_to_year_end_years || []).length
+        ? `<li><b>效期一律到 12/31：</b>${T.extend_to_year_end_years.map(rocY).join('、')} 年在年中到期的證書，效期延至到期當年 12/31（效期總長不超過四年，依醫策會作業程序「至多四年」），年底統一辦理展延，新證自次年 1/1 起四年。</li>`
+        : '<li><b>展延接續、效期到 12/31：</b>原效期不變。展延後的新效期從原效期到期的隔天開始，到「到期那一年起算第四年」的 12/31（不超過醫策會「至多四年」）；原效期剛好到 12/31 的人，新效期為完整四年。新證開始的那一年不另計年度時數。</li>'}
       <li><b>舊證照舊規定：</b>效期起日在 ${rocY(T.new_rule_cert_start.slice(0, 4))}/${Number(T.new_rule_cert_start.slice(5, 7))}/${Number(T.new_rule_cert_start.slice(8, 10))} 之前的證書，依原規定展延（效期屆滿前二年內 ${L.renewal_total ?? 8} 點），不追溯每年四小時；換發新證後才適用每年四小時。</li>
       <li><b>年中認證：</b>經科部每季提報者，自下一季的第一天（1/1、4/1、7/1、10/1）生效，效期至生效年度起算第四年度 12/31。效期不是從 1/1 開始的，生效當年度不另計年度時數。</li>
       ${(T.counseling_years || []).length ? `<li><b>輔導年（試行）：</b>${T.counseling_years.map(rocY).join('、')} 年未完成每年四小時者，只提醒、不暫停資格；之後的年度未完成，次年 1/1 起暫停資格，補滿後次月恢復。</li>` : ''}
     </ol>
-    <div class="note">範例：效期原至 116/5/31 → 延至 116/12/31 → 116 年底展延 → 新證 117/1/1–120/12/31，117 年起每年四小時。</div></section>`;
+    <div class="note">${(T.extend_to_year_end_years || []).length
+      ? '範例：效期原至 116/5/31 → 延至 116/12/31 → 116 年底展延 → 新證 117/1/1–120/12/31，117 年起每年四小時。'
+      : '範例：效期原至 117/10/31 → 展延後新證 117/11/1–120/12/31（3 年 2 個月），118–120 年每年四小時；原效期至 116/12/31 → 新證 117/1/1–120/12/31（完整四年）。'}</div></section>`;
   // 護理主管：只看醫事職類（新舊制）與過渡規定
   $('content').innerHTML = nurseHead() ? you + allied + trans : you + doctors + allied + trans + others + common;
 }
