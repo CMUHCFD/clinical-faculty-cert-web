@@ -281,16 +281,37 @@ function toggleView(btn) {
 function openApply(track) {
   let dlg = $('applyDlg');
   if (!dlg) { dlg = document.createElement('dialog'); dlg.id = 'applyDlg'; dlg.className = 'small-dlg'; document.body.appendChild(dlg); }
+  const C = state.applyCtx || {}, d = C.d || {};
+  const eligible = !!(d.initialEligible || d.renewalCompliant);
+  const n = v => Math.round((Number(v) || 0) * 10) / 10;
+  // ① 這次認證的效期（依核准日試算；舊制期間另列 116 年新制開始後核准的效期）
+  const cfg = (state.rules && state.rules.regime) || {};
+  const newFrom = cfg.new_from_year || 2027;
+  const per = (det, regime, ref) => certPeriod({ ve: det && det.activeCertificate ? det.activeCertificate.valid_end : null, le: det && det.lastCertificate ? det.lastCertificate.valid_end : null }, ref, regime);
+  const legacyNow = C.regime === 'legacy';
+  const pNow = per(legacyNow ? C.dl : (C.dn || d), C.regime, today());
+  const pNew = legacyNow && C.dn ? per(C.dn, 'new', `${newFrom - 1}-12-31`) : null;
+  const yrs = p => { const a = p.start.split('/').map(Number), b = p.end.split('/').map(Number); const m = (b[0] - a[0]) * 12 + b[1] - a[1] + 1; return m % 12 ? `${Math.floor(m / 12)} 年 ${m % 12} 個月` : `${m / 12} 年`; };
+  const period = `<div class="ap-period"><div><span>${legacyNow ? '現行舊制（現在核准）' : '新制'}</span><b>${esc(pNow.start)} － ${esc(pNow.end)}</b><small>約 ${yrs(pNow)}</small></div>
+    ${pNew ? `<div class="muted-box"><span>若 ${newFrom - 1911} 年新制開始後才核准</span><b>${esc(pNew.start)} － ${esc(pNew.end)}</b><small>約 ${yrs(pNew)}，效期一律到 12/31</small></div>` : ''}</div>
+    <p class="hint" style="margin:4px 0 0">實際效期以師培中心核准的日期為準。</p>`;
+  // ② 我的時數概況（本次採計期間）
+  const reqs = (d.requirements || []).filter(q => q.key !== 'makeup');
+  const hours = `<ul class="ap-req">${reqs.map(q => `<li class="${q.met ? 'met' : ''}"><span>${q.met ? '✓' : '○'} ${esc(q.label)}</span><b class="num">${n(q.have)} / ${n(q.need)} ${esc(q.unit)}</b></li>`).join('')}</ul>
+    ${d.seniorityDeemed ? '<p class="hint" style="margin:4px 0 0">教學醫院年資：你曾取得臨床教師認證，年資視為符合，不用另外證明。</p>' : ''}`;
   dlg.innerHTML = `<form id="applyDlgForm" class="dlg-body"><h3>申請臨床教師認證（${track === 'renewal' ? '展延' : '新增'}）</h3>
-    <p class="hint">送出後由師培中心審核，結果會顯示在「我的認證」。系統已附上你的修課時數，不用另外準備。</p>
-    <label>院外師資培育課程時數（選填：課名、主辦單位、日期、時數）<input id="adExt" type="text"></label>
+    <div class="group-label">這次認證的效期</div>${period}
+    <div class="group-label">我的時數概況</div>${hours}
+    ${eligible
+      ? '<p class="ap-ok">✓ 你的時數與資格都已符合，直接送出即可，不用填寫其他資料。</p>'
+      : '<p class="hint">目前系統計算尚未符合；若有院外師資培育課程，請填寫以便師培中心採計。</p><label>院外師資培育課程時數（課名、主辦單位、日期、時數）<input id="adExt" type="text"></label>'}
     <label>備註（選填）<input id="adMemo" type="text"></label>
     <div style="display:flex;gap:8px"><button class="btn btn-primary" style="width:auto" type="submit">確認送出</button><button class="btn btn-ghost" type="button" onclick="$('applyDlg').close()">取消</button></div></form>`;
   dlg.showModal();
   $('applyDlgForm').onsubmit = async e => {
     e.preventDefault();
     const btn = e.target.querySelector('[type=submit]'); btn.disabled = true; btn.textContent = '送出中…';
-    const d = await act('cert.apply', { emp_id: state.me.emp_id, external_hours: $('adExt').value, memo: $('adMemo').value || '本人申請' });
+    const d = await act('cert.apply', { emp_id: state.me.emp_id, external_hours: $('adExt') ? $('adExt').value : '', memo: $('adMemo').value || '本人申請' });
     dlg.close();
     if (d) { state.list = null; renderPerson(state.me.emp_id); }
   };
@@ -1244,6 +1265,7 @@ function personHTML(o) {
     + block('records', appList + recs);   // 結論 → 我的身分要完成什麼 → 下一步 → 細節
   const fb = own && !o.lookup && !o.admin ? feedbackCard('login') : '';
   if (!simple) return full + fb;
+  if (own && !o.lookup) state.applyCtx = { d, dl: row.detail, dn: row.detail_new, regime: o.regime };   // 申請視窗用：效期試算、時數概況
   return simpleView(d, { records, apps, regime: o.regime, name: staff?.name || '', self: own && !o.lookup }) + `<div class="lk-more" ${simpleMode() ? 'hidden' : ''}>${full}</div>` + fb;
 }
 
@@ -2364,11 +2386,11 @@ function pgMail() {
 
 // ---------- 到期與提報：① 選時間 → ② 選職類 → ③ 名單與匯出（分段下鑽） ----------
 // 下一段認證效期（與伺服器核准時的算法相同；回傳民國日期，供醫策會提報檔使用）
-function certPeriod(r, ref) {
+function certPeriod(r, ref, regime) {
   const t = ref || today(), roc = d => `${Number(d.slice(0, 4)) - 1911}/${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
   const renewing = r.ve && r.ve >= t;
   let start, end;
-  if (state.regime === 'legacy') {
+  if ((regime || state.regime) === 'legacy') {
     // 次月 1 日起整兩年，迄日為期滿月份的最後一天（與醫策會既有核予方式一致）
     const years = (state.rules.legacy || {}).cert_validity_years || 2;
     const from = renewing ? r.ve : t;

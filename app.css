@@ -702,3 +702,14 @@ td input[type=checkbox], th input[type=checkbox] { width: 18px; height: 18px; ma
 .nr-card small { color: var(--muted); } .nr-card .pill { justify-self: start; }
 td.warn { color: var(--crimson); font-weight: 700; }
 .sv-apply { width: 100%; margin-top: 14px; font-size: 18px; padding: 14px; } .sv-alt { margin: 12px 0 0; text-align: center; }
+
+/* ---------- 申請視窗：效期試算、時數概況 ---------- */
+.ap-period { display: grid; gap: 8px; }
+.ap-period > div { display: grid; gap: 2px; background: var(--primary-light); border-radius: 10px; padding: 10px 12px; }
+.ap-period > div.muted-box { background: var(--bg); }
+.ap-period span { font-size: 13px; color: var(--muted); } .ap-period b { font-size: 20px; color: var(--primary-dark); } .ap-period small { color: var(--muted); }
+.ap-req { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.ap-req li { display: flex; justify-content: space-between; gap: 10px; padding: 6px 10px; border-radius: 8px; background: #fff6e6; font-size: 14px; }
+.ap-req li.met { background: #eaf7f3; } .ap-req b { white-space: nowrap; }
+.ap-ok { background: #eaf7f3; color: #2c8a78; border-radius: 10px; padding: 10px 12px; font-weight: 700; margin: 12px 0 4px; }
+#applyDlg { max-width: 520px; width: calc(100% - 32px); }
