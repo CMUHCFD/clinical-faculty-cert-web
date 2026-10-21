@@ -2933,7 +2933,11 @@ async function renderReview() {
     return `<small>認證效期（可修改）：</small><br>
       <input id="vs-${esc(a.id)}" type="date" value="${esc(p.start)}" style="width:150px"> ～<br><input id="ve-${esc(a.id)}" type="date" value="${esc(p.end)}" style="width:150px"><br>`;
   };
+  state.reviewApps = apps;
+  // 可批次核准＋下載醫策會上傳檔：待審、非他院轉任、未被標記為醫策會不受理
+  const batchable = a => a.status === '審核中' && a.app_type !== '他院轉任採認' && !pecEx(a.emp_id);
   const row = a => `<tr>
+    <td>${batchable(a) ? `<input type="checkbox" class="rv-pick" value="${esc(a.id)}" aria-label="勾選" onchange="rvCount()">` : ''}</td>
     <td><button class="btn-link" type="button" onclick="go('person','${esc(a.emp_id)}')">${empLabel(a.emp_id)}</button><br><small>${esc(a.staff?.dept || '')}</small></td>
     <td>${esc(a.app_type)}<br><small>${esc(fmtTime(a.submitted_at))}${a.submitted_by && a.submitted_by !== a.emp_id ? `<br>由 ${esc(a.submitted_by)} 提報` : ''}</small></td>
     <td class="reason">${a.app_type === '他院轉任採認'
@@ -2965,9 +2969,35 @@ async function renderReview() {
     <div class="note">效期用您核准時填寫的效期。按下後請選擇您電腦上的員工名冊（只在瀏覽器內讀取，不會上傳）。他院轉任採認者不列入本名單。</div></section>`;
   $('content').innerHTML = approvedCard + await tutorPendingCard() + `<section class="card"><h3>認證申請（${apps.filter(a => a.status === '審核中').length} 件待審）</h3>
     <div class="note">核准後系統會寫入認證效期並重新計算該員狀態；提報醫策會 PEC 平台仍需在您的電腦上產生提報檔（雲端沒有身分證字號）。</div>
-    <div class="table-wrap"><table><thead><tr><th>員工編號</th><th>申請</th><th>系統檢核</th><th>審查</th></tr></thead><tbody>
-    ${apps.map(row).join('') || '<tr><td colspan="4" class="empty">目前沒有申請</td></tr>'}</tbody></table></div></section>`;
+    ${apps.some(batchable) ? `<div class="rv-batch"><span>已勾選 <b id="rvN">0</b> 件</span>
+      <button class="btn btn-primary" type="button" onclick="reviewBatch()">核准勾選的申請，並下載醫策會上傳檔</button>
+      <small>依每列填寫的認證效期核准；下載時請選擇您電腦上的員工名冊（只在瀏覽器內讀取身分證字號，不會上傳）。檔案格式同衛福部「師資認證_認證教師」範本。</small></div>` : ''}
+    <div class="table-wrap"><table><thead><tr><th>${apps.some(batchable) ? '<input type="checkbox" aria-label="全選" onchange="document.querySelectorAll(\'.rv-pick\').forEach(c=>c.checked=this.checked);rvCount()">' : ''}</th><th>員工編號</th><th>申請</th><th>系統檢核</th><th>審查</th></tr></thead><tbody>
+    ${apps.map(row).join('') || '<tr><td colspan="5" class="empty">目前沒有申請</td></tr>'}</tbody></table></div></section>`;
   if ($('amSel')) $('amSel').onchange = e => { state.approvedMonth = e.target.value; renderReview(); };
+}
+function rvCount() { if ($('rvN')) $('rvN').textContent = document.querySelectorAll('.rv-pick:checked').length; }
+// 批次：先讀名冊（需在點擊當下開檔案視窗）→ 逐件核准 → 用核准的效期產生衛福部上傳檔＋核對清冊
+async function reviewBatch() {
+  const ids = [...document.querySelectorAll('.rv-pick:checked')].map(c => c.value);
+  if (!ids.length) return toast('請先勾選要核准的申請', false);
+  const items = ids.map(id => ({ id, a: (state.reviewApps || []).find(x => x.id === id), s: $(`vs-${id}`)?.value || '', e: $(`ve-${id}`)?.value || '' }));
+  const bad = items.filter(x => !x.s || !x.e || x.e < x.s);
+  if (bad.length) return toast(`有 ${bad.length} 件的認證效期未填或起迄顛倒，請先修正`, false);
+  if (!confirm(`確定核准 ${items.length} 件申請，並下載醫策會上傳檔？`)) return;
+  try { await pickRoster(); } catch (err) { return toast(err.message, false); }
+  const okRows = [], fails = [];
+  for (const [i, x] of items.entries()) {
+    toast(`核准中…（${i + 1} / ${items.length}）`);
+    try {
+      await api('cert.review', { id: x.id, approve: true, comment: $(`cm-${x.id}`)?.value || '', valid_start: x.s, valid_end: x.e });
+      okRows.push({ emp_id: x.a.emp_id, dept: x.a.staff?.dept, staff: x.a.staff, teach: x.a.auto_check?.teaching, need: '', valid_end: '', app_type: x.a.app_type,
+        period: { start: adToRoc(x.s), end: adToRoc(x.e) } });
+    } catch (err) { fails.push(`${x.a.emp_id}：${err.message}`); }
+  }
+  if (okRows.length) await downloadPec(okRows, undefined, '本次核准', r => r.app_type);
+  if (fails.length) toast(`已核准 ${okRows.length} 件；${fails.length} 件失敗：${fails.slice(0, 3).join('；')}`, false);
+  state.list = null; renderReview();
 }
 function review(id, approve) {
   const s = $(`vs-${id}`) ? $(`vs-${id}`).value : '', e = $(`ve-${id}`) ? $(`ve-${id}`).value : '';

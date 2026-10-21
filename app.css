@@ -739,3 +739,4 @@ td.warn { color: var(--crimson); font-weight: 700; }
 .fb-reply-btns { display: flex; gap: 8px; justify-content: flex-end; } .fb-reply-btns .btn { width: auto; }
 .fb-replied { margin-top: 6px; background: #eaf7f3; border-radius: 8px; padding: 8px 10px; } .fb-replied small { display: block; color: var(--muted); }
 .nav-badge { display: inline-block; min-width: 18px; padding: 0 5px; margin-left: 4px; border-radius: 9px; background: var(--crimson); color: #fff; font-size: 12px; line-height: 18px; text-align: center; }
+.rv-batch { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; background: var(--primary-light); border-radius: 10px; padding: 10px 12px; margin: 8px 0; } .rv-batch .btn { width: auto; } .rv-batch small { flex-basis: 100%; color: var(--muted); }
