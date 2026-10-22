@@ -776,7 +776,7 @@ async function boot() {
   // 護理部認證概況（取代 Power BI）：師培中心人員、護理職類管理人與護理部單位主管；護理主管放在第一個
   if (canNursing()) { if (isCfd()) views.splice(views.findIndex(v => v[0] === 'all') + 1, 0, ['nursing', '護理部概況']); else views.unshift(['nursing', '護理部概況']); }
   // 護理主管（護理長、督導）：只留教師概況、自己單位的師生比、醫事職類認證規範；職類管理人另有訓練計畫
-  if (nurseHead()) views.splice(0, views.length, ['nursing', '護理部概況'], ['ratio', '師生比'], ...(state.me.scope_profession && !(state.me.scope_units || []).length ? [['plan', '訓練計畫']] : []), ['rules', '認證規範']);
+  if (nurseHead()) views.splice(0, views.length, ['nursing', '護理部概況'], ['ratio', '師生比'], ...(state.me.scope_profession && !(state.me.scope_units || []).length && state.me.profession === state.me.scope_profession ? [['plan', '訓練計畫']] : []), ['rules', '認證規範']);
   logView('login');
   idleGuard();
   setFab(isCfd() ? null : 'login');   // 師培中心人員是處理反映的人，不顯示
@@ -1540,7 +1540,10 @@ async function renderRatio() {
 function renderRatioUnits(months, keys, label) {
   const k = keys.includes(state.ratioMonth) ? state.ratioMonth : keys[0];
   const M = months[k], R = M.ratioRequired || 3;
-  const mine = m => (months[m].byUnit || []).filter(u => u.prof === '護理師' && inNurseScope(u.dept));
+  const pick = nfUnits();   // 與護理部概況共用「選擇要看的單位」
+  const inScopeUnits = m => (months[m].byUnit || []).filter(u => u.prof === '護理師' && inNurseScope(u.dept));
+  const mine = m => inScopeUnits(m).filter(u => !pick.length || pick.includes(u.dept));
+  state.nfAllUnits = [...new Map(keys.flatMap(m => inScopeUnits(m).map(u => [u.dept, u.teachers + u.trainees]))).entries()];
   if (!M.byUnit) { $('content').innerHTML = '<div class="card empty">師生比資料尚未分單位，請師培中心重新執行 node tools/teacher-ratio.js。</div>'; return; }
   const U = mine(k).sort((a, b) => (a.ok - b.ok) || b.trainees - a.trainees);
   const sum = U.reduce((t, u) => ({ t: t.t + u.teachersValid, s: t.s + u.trainees }), { t: 0, s: 0 });
@@ -1552,6 +1555,8 @@ function renderRatioUnits(months, keys, label) {
     </tbody></table></div><p class="hint">格內為「有效教師／學員」，紅字為未達 1:${R}。</p></section>` : '';
   $('content').innerHTML = `
     <section class="card"><h3>師生比｜我負責的單位</h3>
+      ${state.nfAllUnits.length > 1 ? `<p style="margin:0 0 8px"><button class="btn ${pick.length ? 'btn-primary' : 'btn-ghost'}" type="button" style="width:auto" onclick="openUnitFilter()">選擇要看的單位（${pick.length ? `已選 ${pick.length} 個` : '全部'}）</button>
+        ${pick.length ? '<button class="btn-link" type="button" onclick="setNfUnits([])">改回全部單位</button>' : ''}</p>` : ''}
       <div class="filters" style="align-items:center"><label style="margin:0;font-weight:700">月份 <select id="rMonth" style="display:inline-block;width:auto;margin-left:6px">${keys.map(x => `<option value="${x}" ${x === k ? 'selected' : ''}>${label(x)}</option>`).join('')}</select></label>
         <span class="hint" style="margin:0">每位臨床教師至多帶 ${R} 名 PGY 學員（師生比至少 1:${R}）。依 ${label(k)} 核定名單，教師以 ${esc(M.ref)} 是否持有效認證判定。</span></div></section>
     <section class="kpis">
@@ -2324,7 +2329,10 @@ async function renderNursing() {
   const CLS = { ok: ['認證有效', 'var(--success)'], soon: ['一年內到期', 'var(--warning)'], can: ['可提報認證', 'var(--secondary)'], exp: ['已過期（保留期）', 'var(--crimson)'], none: ['尚未認證', '#c9d3da'] };
   const area = r => (r.dept || '').startsWith('護理部') ? '護理部' : '非護理部';
   const oneUnit = new Set(list.map(r => r.dept)).size === 1 ? list[0].dept : '';   // 單位主管只看自己單位
-  const scoped = list.filter(r => (!F.area || area(r) === F.area));
+  // 「選擇要看的單位」：畫面篩選（不改權限），記在這台電腦的瀏覽器
+  const pick = oneUnit ? [] : nfUnits();
+  const scoped = list.filter(r => (!F.area || area(r) === F.area) && (!pick.length || pick.includes(r.dept)));
+  state.nfAllUnits = [...list.reduce((m, r) => m.set(r.dept || '（未註明）', (m.get(r.dept || '（未註明）') || 0) + 1), new Map())];
   const rate = L => L.length ? Math.round(L.filter(isValid).length / L.length * 1000) / 10 : 0;
   const cnt = (L, k) => L.filter(r => cls(r) === k).length;
   // ① 四個大數字
@@ -2360,7 +2368,10 @@ async function renderNursing() {
   $('content').innerHTML = `
     <section class="card"><h3>${oneUnit ? `${esc(oneUnit)}｜臨床教師認證概況` : '護理部臨床教師認證概況'}</h3>
       ${oneUnit ? '' : `<div class="filters" style="align-items:center">
-        <div class="seg">${[['', '全部護理人員'], ['護理部', '護理部'], ['非護理部', '非護理部單位']].map(([v, s]) => `<button type="button" class="${F.area === v ? 'is-active' : ''}" onclick="state.nf.area='${v}';state.nf.unit='';renderNursing()">${s}</button>`).join('')}</div></div>`}
+        <div class="seg">${[['', '全部護理人員'], ['護理部', '護理部'], ['非護理部', '非護理部單位']].map(([v, s]) => `<button type="button" class="${F.area === v ? 'is-active' : ''}" onclick="state.nf.area='${v}';state.nf.unit='';renderNursing()">${s}</button>`).join('')}</div>
+        <button class="btn ${pick.length ? 'btn-primary' : 'btn-ghost'}" type="button" style="width:auto" onclick="openUnitFilter()">選擇要看的單位（${pick.length ? `已選 ${pick.length} 個` : '全部'}）</button>
+        ${pick.length ? '<button class="btn-link" type="button" onclick="setNfUnits([])">改回全部單位</button>' : ''}</div>
+        ${pick.length ? `<p class="hint" style="margin:6px 0 0">目前只看：${pick.slice(0, 6).map(esc).join('、')}${pick.length > 6 ? ` 等 ${pick.length} 個單位` : ''}</p>` : ''}`}
       <p class="hint">依「執登職類＝護理」統計；資料每次同步自動更新（${esc(fmtTime(list[0].computed_at))}），不必再整理報表。認證率＝持有效臨床教師認證人數 ÷ 護理人員數。</p></section>
     ${kpi}
     <section class="card"><h3>認證狀態分布</h3>${band}</section>
@@ -2398,6 +2409,32 @@ async function renderNursing() {
   $('nbUnitCsv').onclick = () => download(`護理部各單位認證率_${today()}.csv`, [['單位', '人數', '有效認證', '認證率(%)', '一年內到期', '可提報', '已過期'],
     ...uRows.map(u => [u.u, u.n, u.v, u.rate, u.soon, u.can, u.exp])]);
 }
+// 護理部概況／師生比：自選要看的單位（只影響畫面，不改權限；存在這台電腦的瀏覽器）
+const nfKey = () => `cfdNursingUnits_${(state.me && state.me.emp_id) || ''}`;
+function nfUnits() { try { return JSON.parse(localStorage.getItem(nfKey()) || '[]'); } catch (e) { return state.nfUnitsMem || []; } }
+function setNfUnits(arr) {
+  state.nfUnitsMem = arr;
+  try { localStorage.setItem(nfKey(), JSON.stringify(arr)); } catch (e) { /* 無法儲存時只在本次有效 */ }
+  if ($('ufDlg') && $('ufDlg').open) $('ufDlg').close();
+  state.nf && (state.nf.unit = '');
+  return state.view === 'ratio' ? renderRatio() : renderNursing();
+}
+function openUnitFilter() {
+  const sel = new Set(nfUnits());
+  const all = (state.nfAllUnits || []).sort((a, b) => a[0].localeCompare(b[0], 'zh-Hant'));
+  let dlg = $('ufDlg');
+  if (!dlg) { dlg = document.createElement('dialog'); dlg.id = 'ufDlg'; dlg.className = 'small-dlg'; document.body.appendChild(dlg); }
+  dlg.innerHTML = `<div class="dlg-body"><div class="dlg-head"><h3>選擇要看的單位</h3><button class="btn btn-ghost" type="button" onclick="$('ufDlg').close()">關閉</button></div>
+    <p class="hint">只影響這個畫面要顯示哪些單位，不會改變您的權限；設定會記在這台電腦。</p>
+    <input id="ufQ" type="search" placeholder="搜尋單位名稱，例如 5H、加護、兒童" style="width:100%">
+    <div class="uf-quick"><button class="btn btn-ghost" type="button" onclick="ufMark(true)">全選（目前列出的）</button><button class="btn btn-ghost" type="button" onclick="ufMark(false)">全不選</button></div>
+    <div class="uf-list">${all.map(([u, n]) => `<label class="uf-item"><input type="checkbox" value="${esc(u)}" ${sel.has(u) ? 'checked' : ''}><span>${esc(u)}</span><small>${n} 人</small></label>`).join('')}</div>
+    <div style="display:flex;gap:8px;margin-top:10px"><button class="btn btn-primary" style="width:auto" type="button" onclick="setNfUnits([...document.querySelectorAll('.uf-item input:checked')].map(c=>c.value))">確定</button>
+      <button class="btn btn-ghost" type="button" style="width:auto" onclick="setNfUnits([])">看全部單位</button></div></div>`;
+  $('ufQ').oninput = e => { const q = e.target.value.trim(); dlg.querySelectorAll('.uf-item').forEach(l => { l.hidden = q && !l.textContent.includes(q); }); };
+  dlg.showModal();
+}
+function ufMark(on) { document.querySelectorAll('.uf-item').forEach(l => { if (!l.hidden) l.querySelector('input').checked = on; }); }
 function nbPick(emp, on) { on ? state.nbSel.add(emp) : state.nbSel.delete(emp); if ($('nbSelN')) $('nbSelN').textContent = state.nbSel.size; }
 function nbSelAll() { (state.nbCan || []).forEach(e => state.nbSel.add(e)); renderNursing(); }
 // 逐一送出認證申請（cert.apply；伺服器端會再檢查範圍與資格），完成後重新整理

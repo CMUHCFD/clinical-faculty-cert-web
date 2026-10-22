@@ -740,3 +740,10 @@ td.warn { color: var(--crimson); font-weight: 700; }
 .fb-replied { margin-top: 6px; background: #eaf7f3; border-radius: 8px; padding: 8px 10px; } .fb-replied small { display: block; color: var(--muted); }
 .nav-badge { display: inline-block; min-width: 18px; padding: 0 5px; margin-left: 4px; border-radius: 9px; background: var(--crimson); color: #fff; font-size: 12px; line-height: 18px; text-align: center; }
 .rv-batch { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; background: var(--primary-light); border-radius: 10px; padding: 10px 12px; margin: 8px 0; } .rv-batch .btn { width: auto; } .rv-batch small { flex-basis: 100%; color: var(--muted); }
+
+/* ---------- 選擇要看的單位 ---------- */
+#ufDlg { max-width: 560px; width: calc(100% - 32px); }
+.uf-quick { display: flex; gap: 8px; margin: 8px 0; } .uf-quick .btn { width: auto; padding: 4px 10px; font-size: 13px; }
+.uf-list { max-height: 50vh; overflow: auto; border: 1px solid var(--line); border-radius: 10px; padding: 4px; }
+.uf-item { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; margin: 0; font-weight: 400; cursor: pointer; }
+.uf-item:hover { background: var(--bg); } .uf-item input { width: auto; margin: 0; } .uf-item small { color: var(--muted); }
