@@ -2328,9 +2328,12 @@ async function renderNursing() {
   const cls = r => isValid(r) ? (r.ve <= in12 ? 'soon' : 'ok') : r.can_apply ? 'can' : r.status_code === 'expired' ? 'exp' : 'none';
   const CLS = { ok: ['認證有效', 'var(--success)'], soon: ['一年內到期', 'var(--warning)'], can: ['可提報認證', 'var(--secondary)'], exp: ['已過期（保留期）', 'var(--crimson)'], none: ['尚未認證', '#c9d3da'] };
   const area = r => (r.dept || '').startsWith('護理部') ? '護理部' : '非護理部';
-  const oneUnit = new Set(list.map(r => r.dept)).size === 1 ? list[0].dept : '';   // 單位主管只看自己單位
+  const unitN = new Set(list.map(r => r.dept)).size;
+  const oneUnit = unitN === 1 ? list[0].dept : '';   // 單位主管只看自己單位
+  const few = unitN > 1 && unitN <= 8;                 // 授權幾個單位（例如門診護理長）：單位樹狀展開看人員
+  if (few) { F.area = ''; F.unit = ''; }
   // 「選擇要看的單位」：畫面篩選（不改權限），記在這台電腦的瀏覽器
-  const pick = oneUnit ? [] : nfUnits();
+  const pick = oneUnit || few ? [] : nfUnits();
   const scoped = list.filter(r => (!F.area || area(r) === F.area) && (!pick.length || pick.includes(r.dept)));
   state.nfAllUnits = [...list.reduce((m, r) => m.set(r.dept || '（未註明）', (m.get(r.dept || '（未註明）') || 0) + 1), new Map())];
   const rate = L => L.length ? Math.round(L.filter(isValid).length / L.length * 1000) / 10 : 0;
@@ -2365,9 +2368,31 @@ async function renderNursing() {
   people.sort((a, b) => (a.dept || '').localeCompare(b.dept || '') || (a.ve || '9').localeCompare(b.ve || '9'));
   state.nbCan = people.filter(canSubmit).map(r => r.emp_id);
   const tag = (k, v) => v ? `<b>${esc(k)}</b> ${esc(v)}　<button class="btn-link" type="button" onclick="state.nf.${k === '單位' ? 'unit' : k === '能階' ? 'level' : 'status'}='';renderNursing()">✕</button>` : '';
+  const pRow = (r, withUnit = true) => `<tr><td>${canSubmit(r) ? `<input type="checkbox" aria-label="提報" ${state.nbSel.has(r.emp_id) ? 'checked' : ''} onchange="nbPick('${esc(r.emp_id)}',this.checked)">` : pending.has(r.emp_id) ? '<small class="muted">審核中</small>' : ''}</td>
+        <td><button class="btn-link" type="button" onclick="go('person','${esc(r.emp_id)}')">${empLabel(r.emp_id)}</button></td>${withUnit ? `<td>${esc(r.dept)}</td>` : ''}<td>${esc(r.staff?.title || '')}</td>
+        <td><span class="pill" style="background:${CLS[cls(r)][1]};color:${cls(r) === 'none' ? 'var(--text)' : '#fff'}">${CLS[cls(r)][0]}</span>${pending.has(r.emp_id) ? ' <span class="pill expiring">已提報・審核中</span>' : canSubmit(r) && cls(r) !== 'can' ? ' <span class="pill eligible">可提報展延</span>' : ''}</td><td>${esc(r.valid_end || '')}</td>
+        <td class="num">${esc(r.teach)} / ${esc(r.need)}</td><td class="reason">${esc(r.reason)}</td></tr>`;
+  const listTools = `<div class="filters" style="align-items:center">
+        <select id="nbSt" style="width:auto"><option value="">所有狀態</option><option value="submit" ${F.status === 'submit' ? 'selected' : ''}>可提報（尚未送出）</option><option value="pend" ${F.status === 'pend' ? 'selected' : ''}>已提報・審核中</option>${Object.keys(CLS).map(k => `<option value="${k}" ${F.status === k ? 'selected' : ''}>${CLS[k][0]}</option>`).join('')}</select>
+        <input id="nbQ" type="search" placeholder="員工編號或姓名" value="${esc(F.q)}" style="flex:1;min-width:160px">
+        <button class="btn btn-ghost" type="button" id="nbCsv">下載名單</button></div>
+      ${people.some(canSubmit) ? `<div class="nb-submit"><span>已勾選 <b id="nbSelN">${state.nbSel.size}</b> 人</span>
+        <button class="btn btn-ghost" type="button" onclick="nbSelAll()">勾選名單中可提報的 ${people.filter(canSubmit).length} 人</button>
+        <button class="btn btn-primary" type="button" onclick="nbSubmit()">提報給師培中心審核</button>
+        <small>送出後由師培中心在「審查」頁審核，結果會更新在這裡。</small></div>` : ''}`;
+  // 幾個單位的主管：一開始只列單位，點開看單位內人員（有篩選或搜尋時，自動展開有符合人員的單位）
+  const nfOpen = state.nfOpen = state.nfOpen || new Set();
+  const filtering = !!(F.status || F.q);
+  const tree = !few ? '' : `<section class="card" id="nbList"><h3>各單位人員（${uRows.length} 個單位，點單位展開）</h3>${listTools}
+      ${[...uRows].sort((a, b) => a.u.localeCompare(b.u, 'zh-Hant')).map(u => { const L = people.filter(r => (r.dept || '（未註明）') === u.u);
+        return `<details class="nb-tree" data-u="${esc(u.u)}" ontoggle="nfToggle(this)" ${(filtering ? L.length : nfOpen.has(u.u)) ? 'open' : ''}>
+        <summary><span class="nb-l" title="${esc(u.u)}">${esc(u.u)}</span><span class="nb-t ${u.rate < 30 ? 'low' : ''}"><i style="width:${u.rate}%"></i></span><span class="num">${u.rate}%</span>
+          <small>${u.v} / ${u.n} 人有效${u.soon ? `・一年內到期 ${u.soon}` : ''}${u.can ? `・可提報 ${u.can}` : ''}${filtering ? `・符合 ${L.length}` : ''}</small></summary>
+        <div class="table-wrap"><table><thead><tr><th>提報</th><th>員工編號</th><th>職稱</th><th>狀態</th><th>效期至</th><th>教學點數</th><th>說明</th></tr></thead><tbody>
+        ${L.map(r => pRow(r, false)).join('') || '<tr><td colspan="7" class="empty">沒有符合的人員</td></tr>'}</tbody></table></div></details>`; }).join('')}</section>`;
   $('content').innerHTML = `
-    <section class="card"><h3>${oneUnit ? `${esc(oneUnit)}｜臨床教師認證概況` : '護理部臨床教師認證概況'}</h3>
-      ${oneUnit ? '' : `<div class="filters" style="align-items:center">
+    <section class="card"><h3>${oneUnit ? `${esc(oneUnit)}｜臨床教師認證概況` : few ? `我的單位（${unitN} 個）｜臨床教師認證概況` : '護理部臨床教師認證概況'}</h3>
+      ${oneUnit || few ? '' : `<div class="filters" style="align-items:center">
         <div class="seg">${[['', '全部護理人員'], ['護理部', '護理部'], ['非護理部', '非護理部單位']].map(([v, s]) => `<button type="button" class="${F.area === v ? 'is-active' : ''}" onclick="state.nf.area='${v}';state.nf.unit='';renderNursing()">${s}</button>`).join('')}</div>
         <button class="btn ${pick.length ? 'btn-primary' : 'btn-ghost'}" type="button" style="width:auto" onclick="openUnitFilter()">選擇要看的單位（${pick.length ? `已選 ${pick.length} 個` : '全部'}）</button>
         ${pick.length ? '<button class="btn-link" type="button" onclick="setNfUnits([])">改回全部單位</button>' : ''}</div>
@@ -2375,11 +2400,11 @@ async function renderNursing() {
       <p class="hint">依「執登職類＝護理」統計；資料每次同步自動更新（${esc(fmtTime(list[0].computed_at))}），不必再整理報表。認證率＝持有效臨床教師認證人數 ÷ 護理人員數。</p></section>
     ${kpi}
     <section class="card"><h3>認證狀態分布</h3>${band}</section>
-    ${uRows.length > 1 ? `<section class="card"><h3>需要關注的單位</h3><p class="hint" style="margin:0 0 6px">5 人以上單位中，認證率最低的 5 個；點一下看名單。</p>
+    ${uRows.length > 1 && !few ? `<section class="card"><h3>需要關注的單位</h3><p class="hint" style="margin:0 0 6px">5 人以上單位中，認證率最低的 5 個；點一下看名單。</p>
         ${watch.map(u => `<button type="button" class="nb-row" onclick="state.nf.unit=${esc(JSON.stringify(u.u))};renderNursing();document.getElementById('nbList').scrollIntoView({behavior:'smooth'})">
           <span class="nb-l" title="${esc(u.u)}">${esc(u.u)}</span><span class="nb-t low"><i style="width:${u.rate}%"></i></span><span class="num">${u.rate}%</span><small>${u.v} / ${u.n}</small></button>`).join('') || '<div class="empty">無</div>'}</section>` : ''}
     <section class="card"><h3>未來 24 個月到期人數</h3>${exp}<p class="hint">提前安排展延：到期當年需完成展延時數。</p></section>
-    <section class="card"><h3>各單位（${uRows.length} 個）</h3>
+    ${few ? tree : `<section class="card"><h3>各單位（${uRows.length} 個）</h3>
       <div class="filters"><div class="seg">${[['rate', '認證率低→高'], ['n', '人數多→少'], ['soon', '即將到期多→少']].map(([v, s]) => `<button type="button" class="${sortKey === v ? 'is-active' : ''}" onclick="state.nfSort='${v}';renderNursing()">${s}</button>`).join('')}</div>
         <button class="btn btn-ghost" type="button" id="nbUnitCsv">下載單位統計</button></div>
       <div class="table-wrap nb-units"><table><thead><tr><th>單位</th><th>人數</th><th>有效認證</th><th>認證率</th><th>一年內到期</th><th>可提報</th><th>已過期</th></tr></thead><tbody>
@@ -2387,26 +2412,16 @@ async function renderNursing() {
         <td class="num">${u.n}</td><td class="num">${u.v}</td><td><div class="nb-cell"><span class="nb-t ${u.rate < 30 ? 'low' : ''}"><i style="width:${u.rate}%"></i></span><span class="num">${u.rate}%</span></div></td>
         <td class="num">${u.soon || ''}</td><td class="num">${u.can || ''}</td><td class="num">${u.exp || ''}</td></tr>`).join('')}</tbody></table></div></section>
     <section class="card" id="nbList"><h3>人員名單（${people.length} 人）</h3>
-      <div class="filters" style="align-items:center">
-        <select id="nbSt" style="width:auto"><option value="">所有狀態</option><option value="submit" ${F.status === 'submit' ? 'selected' : ''}>可提報（尚未送出）</option><option value="pend" ${F.status === 'pend' ? 'selected' : ''}>已提報・審核中</option>${Object.keys(CLS).map(k => `<option value="${k}" ${F.status === k ? 'selected' : ''}>${CLS[k][0]}</option>`).join('')}</select>
-        <input id="nbQ" type="search" placeholder="員工編號或姓名" value="${esc(F.q)}" style="flex:1;min-width:160px">
-        <button class="btn btn-ghost" type="button" id="nbCsv">下載名單</button></div>
+      ${listTools}
       ${F.unit ? `<p class="hint">篩選：${tag('單位', F.unit)}</p>` : ''}
-      ${people.some(canSubmit) ? `<div class="nb-submit"><span>已勾選 <b id="nbSelN">${state.nbSel.size}</b> 人</span>
-        <button class="btn btn-ghost" type="button" onclick="nbSelAll()">勾選名單中可提報的 ${people.filter(canSubmit).length} 人</button>
-        <button class="btn btn-primary" type="button" onclick="nbSubmit()">提報給師培中心審核</button>
-        <small>送出後由師培中心在「審查」頁審核，結果會更新在這裡。</small></div>` : ''}
       <div class="table-wrap"><table><thead><tr><th>提報</th><th>員工編號</th><th>單位</th><th>職稱</th><th>狀態</th><th>效期至</th><th>教學點數</th><th>說明</th></tr></thead><tbody>
-      ${people.slice(0, 500).map(r => `<tr><td>${canSubmit(r) ? `<input type="checkbox" aria-label="提報" ${state.nbSel.has(r.emp_id) ? 'checked' : ''} onchange="nbPick('${esc(r.emp_id)}',this.checked)">` : pending.has(r.emp_id) ? '<small class="muted">審核中</small>' : ''}</td>
-        <td><button class="btn-link" type="button" onclick="go('person','${esc(r.emp_id)}')">${empLabel(r.emp_id)}</button></td><td>${esc(r.dept)}</td><td>${esc(r.staff?.title || '')}</td>
-        <td><span class="pill" style="background:${CLS[cls(r)][1]};color:${cls(r) === 'none' ? 'var(--text)' : '#fff'}">${CLS[cls(r)][0]}</span>${pending.has(r.emp_id) ? ' <span class="pill expiring">已提報・審核中</span>' : canSubmit(r) && cls(r) !== 'can' ? ' <span class="pill eligible">可提報展延</span>' : ''}</td><td>${esc(r.valid_end || '')}</td>
-        <td class="num">${esc(r.teach)} / ${esc(r.need)}</td><td class="reason">${esc(r.reason)}</td></tr>`).join('') || '<tr><td colspan="8" class="empty">沒有符合的人員</td></tr>'}</tbody></table></div>
-      ${people.length > 500 ? '<p class="hint">畫面顯示前 500 人，完整名單請下載。</p>' : ''}</section>`;
+      ${people.slice(0, 500).map(r => pRow(r)).join('') || '<tr><td colspan="8" class="empty">沒有符合的人員</td></tr>'}</tbody></table></div>
+      ${people.length > 500 ? '<p class="hint">畫面顯示前 500 人，完整名單請下載。</p>' : ''}</section>`}`;
   $('nbSt').onchange = e => { F.status = e.target.value; renderNursing(); };
   $('nbQ').onchange = e => { F.q = e.target.value.trim(); renderNursing(); };
   $('nbCsv').onclick = () => download(`護理部認證名單_${today()}.csv`, [['員工編號', '姓名', '單位', '職稱', '能階', '狀態', '效期至', '教學點數', '應達', '說明'],
     ...people.map(r => [r.emp_id, nameOf(r.emp_id), r.dept, r.staff?.title || '', N_LEVEL(r.staff?.title), CLS[cls(r)][0], r.valid_end || '', r.teach, r.need, r.reason])]);
-  $('nbUnitCsv').onclick = () => download(`護理部各單位認證率_${today()}.csv`, [['單位', '人數', '有效認證', '認證率(%)', '一年內到期', '可提報', '已過期'],
+  if ($('nbUnitCsv')) $('nbUnitCsv').onclick = () => download(`護理部各單位認證率_${today()}.csv`, [['單位', '人數', '有效認證', '認證率(%)', '一年內到期', '可提報', '已過期'],
     ...uRows.map(u => [u.u, u.n, u.v, u.rate, u.soon, u.can, u.exp])]);
 }
 // 護理部概況／師生比：自選要看的單位（只影響畫面，不改權限；存在這台電腦的瀏覽器）
@@ -2434,6 +2449,7 @@ function openUnitFilter() {
   $('ufQ').oninput = e => { const q = e.target.value.trim(); dlg.querySelectorAll('.uf-item').forEach(l => { l.hidden = q && !l.textContent.includes(q); }); };
   dlg.showModal();
 }
+function nfToggle(el) { const s = state.nfOpen || (state.nfOpen = new Set()); el.open ? s.add(el.dataset.u) : s.delete(el.dataset.u); }
 function ufMark(on) { document.querySelectorAll('.uf-item').forEach(l => { if (!l.hidden) l.querySelector('input').checked = on; }); }
 function nbPick(emp, on) { on ? state.nbSel.add(emp) : state.nbSel.delete(emp); if ($('nbSelN')) $('nbSelN').textContent = state.nbSel.size; }
 function nbSelAll() { (state.nbCan || []).forEach(e => state.nbSel.add(e)); renderNursing(); }

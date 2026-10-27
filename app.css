@@ -693,6 +693,13 @@ td input[type=checkbox], th input[type=checkbox] { width: 18px; height: 18px; ma
 .act-way { display: flex; width: 100%; margin-bottom: 10px; } .act-way button { flex: 1; font-size: 13px; }
 
 /* ---------- 護理主管：提報列、單位師生比 ---------- */
+.nb-tree { border: 1px solid var(--line); border-radius: 10px; margin: 8px 0; background: var(--card); }
+.nb-tree > summary { display: grid; grid-template-columns: minmax(0, 16em) 1fr 3.6em; grid-template-areas: "l t n" "s s s"; align-items: center; gap: 4px 10px; padding: 10px 14px; cursor: pointer; list-style: none; border-radius: 10px; }
+.nb-tree > summary::-webkit-details-marker { display: none; }
+.nb-tree > summary:hover { background: var(--bg); }
+.nb-tree > summary .nb-l { grid-area: l; } .nb-tree > summary .nb-l::before { content: '▸ '; color: var(--muted); } .nb-tree[open] > summary .nb-l::before { content: '▾ '; }
+.nb-tree > summary .nb-t { grid-area: t; } .nb-tree > summary .num { grid-area: n; text-align: right; font-weight: 700; } .nb-tree > summary small { grid-area: s; color: var(--muted); }
+.nb-tree > .table-wrap { padding: 0 10px 10px; }
 .nb-submit { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; background: var(--primary-light); border-radius: 10px; padding: 10px 12px; margin: 8px 0; }
 .nb-submit .btn { width: auto; } .nb-submit small { color: var(--muted); flex-basis: 100%; }
 .nr-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
