@@ -2330,7 +2330,7 @@ async function renderNursing() {
   const area = r => (r.dept || '').startsWith('護理部') ? '護理部' : '非護理部';
   const unitN = new Set(list.map(r => r.dept)).size;
   const oneUnit = unitN === 1 ? list[0].dept : '';   // 單位主管只看自己單位
-  const few = unitN > 1 && unitN <= 8;                 // 授權幾個單位（例如門診護理長）：單位樹狀展開看人員
+  const few = unitN > 1 && unitN <= 15;                // 授權幾個單位（例如門診護理長、兒童醫院督導）：單位樹狀展開看人員
   if (few) { F.area = ''; F.unit = ''; }
   // 「選擇要看的單位」：畫面篩選（不改權限），記在這台電腦的瀏覽器
   const pick = oneUnit || few ? [] : nfUnits();
