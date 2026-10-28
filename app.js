@@ -255,7 +255,7 @@ function lookupHTML(r) {
   // 預設「簡單版」：一眼看懂狀態、還差什麼、下一步；完整內容收在「看詳細資料」
   return `<div class="lk">${simpleView(d, { records: r.records, apps: r.apps, regime: r.regime, lookup: true, name: r.name })}
     <div class="lk-more" ${simpleMode() ? 'hidden' : ''}>${hero}${roleBar(d)}
-    ${block('teacher', d.trackType === 'exempt' ? '' : journeyCard(d) + reqCard(d, { big: true })
+    ${block('teacher', d.trackType === 'exempt' ? '' : journeyCard(d, r.records || []) + reqCard(d, { big: true })
       + (certTrack && !d.transferredFrom ? '<section class="card lk-note">由其他教學醫院轉任者：您的他院認證可以採認，視為展延教師。請登入後在「我的認證」上傳原認證證書申請查證。</section>' : '')
       + grid + next + (grid ? '' : preview))}
     ${block('cfd', appraisalCard(d, { big: true }))}
@@ -780,10 +780,10 @@ async function boot() {
   logView('login');
   idleGuard();
   setFab(isCfd() ? null : 'login');   // 師培中心人員是處理反映的人，不顯示
-  $('nav').innerHTML = views.map(([v, t]) => `<button type="button" data-view="${v}">${t}</button>`).join('');
+  renderNav(views);
   if ($('empSearch')) $('empSearch').hidden = !(isCfd() || state.role === 'dept_coordinator');
-  $('nav').querySelectorAll('button').forEach(b => { b.onclick = () => go(b.dataset.view); });
-  if (isCfd()) navBadge();
+  if ($('bellBtn')) $('bellBtn').hidden = !isCfd();
+  if (isCfd()) { navBadge(); clearInterval(state.alertT); state.alertT = setInterval(navBadge, 120e3); }
 
   // 掃描簽到 QR 進來的連結：登入後直接完成簽到
   const params = new URLSearchParams(location.search);
@@ -797,6 +797,29 @@ async function boot() {
   if (location.hash === '#nursing' && canNursing()) return go('nursing');
   go(views[0][0]);
 }
+// 選單：項目多（管理者、承辦人員）時依性質收成幾組下拉；項目少（一般同仁、主管）時照舊一排
+const NAV_GROUPS = [['總覽', ['all', 'nursing', 'progress', 'ratio']], ['名單與審查', ['dept', 'expiry', 'review', 'roster']], ['課程', ['courses', 'coursestats', 'plan']],
+  ['反映與紀錄', ['calls', 'logs']], ['個人與規範', ['mine', 'rules']], ['系統', ['admin']]];
+function renderNav(views) {
+  const btn = ([v, t]) => `<button type="button" data-view="${v}">${t}</button>`;
+  let html;
+  if (views.length <= 7) html = views.map(btn).join('');
+  else {
+    const used = new Set();
+    html = NAV_GROUPS.map(([g, keys]) => {
+      const items = views.filter(v => keys.includes(v[0])); items.forEach(v => used.add(v[0]));
+      if (items.length <= 1) return items.map(btn).join('');
+      return `<div class="nav-grp"><button type="button" class="nav-top" aria-haspopup="true" aria-expanded="false">${g}<span class="nav-caret">▾</span></button><div class="nav-menu">${items.map(btn).join('')}</div></div>`;
+    }).join('') + views.filter(v => !used.has(v[0])).map(btn).join('');
+  }
+  $('nav').innerHTML = html;
+  $('nav').querySelectorAll('button[data-view]').forEach(b => { b.onclick = () => { closeNav(); go(b.dataset.view); }; });
+  $('nav').querySelectorAll('.nav-top').forEach(b => { b.onclick = e => {
+    e.stopPropagation(); const g = b.parentElement, open = !g.classList.contains('open');
+    closeNav(); g.classList.toggle('open', open); b.setAttribute('aria-expanded', String(open)); }; });
+  if (!state.navBound) { document.addEventListener('click', () => { closeNav(); closeBell(); }); document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeNav(); closeBell(); } }); state.navBound = true; }
+}
+function closeNav() { document.querySelectorAll('.nav-grp.open').forEach(g => { g.classList.remove('open'); g.querySelector('.nav-top').setAttribute('aria-expanded', 'false'); }); }
 // 以身分證後 4 碼登入的同仁不設密碼：隱藏「變更密碼」；閒置 30 分鐘自動登出（公用電腦保護個資）
 function idleGuard() {
   if ($('pwBtn')) $('pwBtn').hidden = !isCfd();
@@ -821,7 +844,8 @@ function go(view, arg) {
   clearInterval(state.qrTimer);
   if (view === 'person' && state.view !== 'person') state.backTo = state.view;
   state.view = view;
-  $('nav').querySelectorAll('button').forEach(b => b.classList.toggle('is-active', b.dataset.view === view));
+  $('nav').querySelectorAll('button[data-view]').forEach(b => b.classList.toggle('is-active', b.dataset.view === view));
+  $('nav').querySelectorAll('.nav-grp').forEach(g => g.classList.toggle('is-active', !!g.querySelector('button.is-active')));
   $('content').innerHTML = '<div class="card empty">載入中…</div>';
   const run = { mine: () => renderPerson(state.me.emp_id), person: () => renderPerson(arg, true), dept: renderList, all: renderOverview, progress: renderProgress, nursing: renderNursing,
     courses: renderCourses, rules: renderRules, ratio: renderRatio, coursestats: renderCourseStats, calls: renderCalls, logs: renderLogs, plan: () => { state.planId = arg || null; return renderPlanPage(); }, review: renderReview, roster: renderRoster, admin: renderAdmin, expiry: renderExpiry }[view];
@@ -1078,7 +1102,26 @@ function appraisalCard(d, o = {}) {
 const WALKER = `<svg class="walker" viewBox="0 0 32 48" aria-hidden="true"><circle cx="16" cy="7" r="6" fill="currentColor"/>
   <path d="M16 14 L16 30 M16 18 L7 25 M16 18 L25 23 M16 30 L9 45 M16 30 L23 45" stroke="currentColor" stroke-width="4.5" stroke-linecap="round" fill="none"/></svg>`;
 const FLAG = '<svg class="flag" viewBox="0 0 24 36" aria-hidden="true"><path d="M4 2 V34" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><path d="M5 3 H21 L17 9 L21 15 H5 Z" fill="#FFCB0D" stroke="currentColor" stroke-width="1.5"/></svg>';
-function journeyCard(d) {
+// 旅程上的人像或點數一點 → 展開計入本次點數的上課明細（與修課紀錄表的「計入」同一套判斷）
+function journeyRecords(d, records) {
+  const certTrack = d.trackType === 'initial' || d.trackType === 'renewal';
+  const info = { track_type: d.trackType, rg: d.regime, ve: d.activeCertificate && d.activeCertificate.valid_end, le: d.lastCertificate && d.lastCertificate.valid_end,
+    grace: d.renewal && d.renewal.inGrace, wy: d.window && d.window.years };
+  const inWin = inWindowFn(info);
+  const L = (records || []).filter(r => inWin(r.course_date) && (Number(r.teaching_hours) > 0 || (!certTrack && Number(r.general_hours) > 0)))
+    .sort((a, b) => b.course_date.localeCompare(a.course_date));
+  const pts = r => Number(r.teaching_hours || 0) + (certTrack ? 0 : Number(r.general_hours || 0));
+  const n = v => Math.round(v * 10) / 10;
+  const byY = {}; L.forEach(r => { (byY[r.course_date.slice(0, 4)] = byY[r.course_date.slice(0, 4)] || []).push(r); });
+  const body = !L.length ? '<div class="empty">採計期間內沒有計入的課程</div>' : Object.keys(byY).sort().reverse().map(y => `
+      <div class="jr-year"><b>${Number(y) - 1911} 年</b><small>${byY[y].length} 門課・${n(byY[y].reduce((a, r) => a + pts(r), 0))} 點</small></div>
+      <div class="table-wrap"><table><thead><tr><th>日期</th><th>課程名稱</th><th>類別</th><th>${certTrack ? '教學點數' : '點數'}</th></tr></thead><tbody>
+      ${byY[y].map(r => `<tr><td>${esc(r.course_date)}</td><td style="white-space:normal;min-width:200px">${esc(r.course_title)}</td><td>${esc(r.category || '')}</td><td class="num">${n(pts(r))}</td></tr>`).join('')}</tbody></table></div>`).join('');
+  return `<details class="jr-detail" id="jrDetail"><summary>上課明細：計入的 ${L.length} 門課，共 ${n(L.reduce((a, r) => a + pts(r), 0))} 點<small>${esc(d.window?.label || '')}</small></summary>
+    ${body}<p class="hint">線上課程每年至多採認 1 點，所以合計可能略高於系統採計的點數。</p></details>`;
+}
+function jrOpen() { const x = $('jrDetail'); if (!x) return; x.open = !x.open; if (x.open) x.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }
+function journeyCard(d, records) {
   if (!d || d.trackType === 'exempt') return '';
   const n = v => Math.round((Number(v) || 0) * 10) / 10;
   const roc = s => `${Number(s.slice(0, 4)) - 1911}/${Number(s.slice(5, 7))}/${Number(s.slice(8, 10))}`;
@@ -1113,7 +1156,7 @@ function journeyCard(d) {
     const extLine = cert && cert.extended_from ? `<p class="tl-ext">原效期至 ${esc(cert.extended_from_roc)}，依過渡規定<b>延至 ${roc(end)}</b>（效期總長不超過四年），年底統一辦理展延。</p>` : '';
     timeline = `<div class="tl" role="img" aria-label="${esc(title)}：${roc(start)} 至 ${roc(end)}，今天 ${roc(now)}">
         <div class="tl-track">${segs.join('')}</div>
-        <div class="tl-me ${near || after ? 'warn' : ''}" style="left:${me}%">${WALKER}<small>今天</small></div>
+        <div class="tl-me ${near || after ? 'warn' : ''} ${records ? 'jr-click' : ''}" style="left:${me}%" ${records ? 'role="button" tabindex="0" title="看上課明細" onclick="jrOpen()" onkeydown="if(event.key===\'Enter\')jrOpen()"' : ''}>${WALKER}<small>今天</small></div>
         <div class="tl-end" style="left:100%">${FLAG}</div></div>
       <div class="tl-ends"><span>${roc(start)}<small>${certTrack ? '效期起' : '1 月 1 日'}</small></span><span class="tl-cap ${near || after ? 'warn' : ''}">${caption}</span><span>${roc(end)}<small>${certTrack ? '效期迄' : '12 月 31 日'}</small></span></div>
       ${segs.length > 1 ? `<div class="legend tl-legend"><span><i class="s-met"></i>已達標</span><span><i class="s-in_progress"></i>今年進行中</span><span><i class="s-missed"></i>未達標</span><span><i class="s-counsel"></i>輔導年未達標</span><span><i class="s-future"></i>尚未開始</span></div>` : ''}${extLine}`;
@@ -1127,7 +1170,7 @@ function journeyCard(d) {
       const v = need * i / Math.min(12, Math.ceil(need));
       return `<span class="pw-stone ${have >= v ? 'on' : ''}" style="left:${i / Math.min(12, Math.ceil(need)) * 100}%"></span>`;
     }).join('');
-    path = `<div class="pw ${arrived ? 'arrived' : ''}" role="img" aria-label="點數 ${n(have)} / ${n(need)}">
+    path = `<div class="pw ${arrived ? 'arrived' : ''} ${records ? 'jr-click' : ''}" ${records ? `role="button" tabindex="0" title="看上課明細" onclick="jrOpen()" onkeydown="if(event.key==='Enter')jrOpen()"` : 'role="img"'} aria-label="點數 ${n(have)} / ${n(need)}">
         <div class="pw-road"><i style="width:${p}%"></i>${stones}</div>
         <div class="pw-me" style="left:${arrived ? 94 : p}%">${WALKER}<small>${arrived ? '抵達！' : `${n(have)} 點`}</small></div>
         <div class="pw-goal">${FLAG}<small>${n(need)} 點</small></div></div>
@@ -1136,7 +1179,8 @@ function journeyCard(d) {
   if (!timeline && !path) return '';
   return `<section class="card journey"><h3>我的認證旅程</h3>
     ${timeline ? `<div class="group-label">${esc(title)}</div>${timeline}` : ''}
-    ${path ? `<div class="group-label">${certTrack ? '點數進度' : '今年度點數進度'}</div>${path}` : ''}</section>`;
+    ${path ? `<div class="group-label">${certTrack ? '點數進度' : '今年度點數進度'}${records ? '<small class="jr-tip">點人像或點數看上課明細</small>' : ''}</div>${path}` : ''}
+    ${records ? journeyRecords(d, records) : ''}</section>`;
 }
 
 // ---------- 學習偏好軌跡：從修課紀錄看偏好哪些教學能力項目、各年度的變化、常在幾月修課 ----------
@@ -1367,7 +1411,7 @@ function personHTML(o) {
   // 一般同仁看自己的頁面：先給簡單版，完整內容收在「看詳細資料」；管理者、主管查看他人時直接看完整版
   const simple = own && !o.admin && o.role !== 'cfd_staff';
   const full = hero + roleBar(d)
-    + block('teacher', d.trackType === 'exempt' ? '' : journeyCard(d) + meters + transferCard(d, empId, apps, (own || o.admin) && !o.lookup) + next + (grid || preview) + years + (grid ? '' : items))
+    + block('teacher', d.trackType === 'exempt' ? '' : journeyCard(d, records || []) + meters + transferCard(d, empId, apps, (own || o.admin) && !o.lookup) + next + (grid || preview) + years + (grid ? '' : items))
     + block('cfd', appraisalCard(d))
     + block('core', coreCard(d))
     + block('faculty', facultyCard(d), '新聘／升等')
@@ -1698,14 +1742,60 @@ async function loadMyFeedback() {
     ${x.reply ? `<div class="fb-replied"><b>師培中心回覆：</b>${esc(x.reply)}${x.handled_at ? `<small>${when(x.handled_at)}</small>` : ''}</div>` : ''}</li>`).join('')}</ul></section>`;
 }
 
-// 選單「來電紀錄」旁顯示待處理的線上反映數（師培中心人員）
+// 提醒（師培中心人員）：右上角鈴鐺＝待審的認證申請（管理者）＋待處理的線上反映；選單項目與分組也標數字。
+// 每 2 分鐘更新；比上次看過還新的項目標「新」，有新項目時跳提示（開啟桌面通知者另跳系統通知）
+const seenKey = () => `cfdSeen_${(state.me && state.me.emp_id) || ''}`;
+const getSeen = () => { try { return localStorage.getItem(seenKey()) || ''; } catch (e) { return state.seenMem || ''; } };
+function setSeen(t) { state.seenMem = t; try { localStorage.setItem(seenKey(), t); } catch (e) { /* 只在本次有效 */ } }
 async function navBadge() {
+  if (!state.me || !isCfd()) return;
   try {
-    const { count } = await sb.from('feedback').select('id', { count: 'exact', head: true }).eq('status', '待處理');
-    const b = document.querySelector('#nav button[data-view="calls"]');
-    if (b) { b.querySelector('.nav-badge')?.remove(); if (count) b.insertAdjacentHTML('beforeend', `<span class="nav-badge" title="待處理的線上反映">${count}</span>`); }
+    const [fb, ap] = await Promise.all([
+      sb.from('feedback').select('id,emp_id,name,category,message,created_at', { count: 'exact' }).eq('status', '待處理').order('created_at', { ascending: false }).limit(30),
+      isAdmin() ? sb.from('applications').select('id,emp_id,app_type,submitted_at,staff!applications_emp_id_fkey(name,dept)', { count: 'exact' }).eq('status', '審核中').order('submitted_at', { ascending: false }).limit(30) : Promise.resolve({ data: [], count: 0 })
+    ]);
+    const items = [
+      ...(ap.data || []).map(a => ({ kind: 'app', view: 'review', at: a.submitted_at, title: `${a.staff?.name || ''} ${a.emp_id}`, sub: `${a.app_type || '認證申請'}｜${a.staff?.dept || ''}` })),
+      ...(fb.data || []).map(x => ({ kind: 'fb', view: 'calls', at: x.created_at, title: `${x.name || ''} ${x.emp_id}`, sub: `${x.category ? x.category + '｜' : ''}${String(x.message || '').slice(0, 40)}` }))
+    ].sort((a, b) => String(b.at).localeCompare(String(a.at)));
+    const nApp = ap.count || 0, nFb = fb.count || 0, total = nApp + nFb;
+    const seen = getSeen(), fresh = items.filter(x => x.at > seen);
+    state.alerts = { items, nApp, nFb, fresh: fresh.length };
+    const mark = (el, n, tip) => { if (!el) return; el.querySelector(':scope > .nav-badge')?.remove(); if (n) el.insertAdjacentHTML('beforeend', `<span class="nav-badge" title="${tip}">${n}</span>`); };
+    mark(document.querySelector('#nav button[data-view="calls"]'), nFb, '待處理的線上反映');
+    mark(document.querySelector('#nav button[data-view="review"]'), nApp, '待審的認證申請');
+    document.querySelectorAll('#nav .nav-grp').forEach(g => mark(g.querySelector('.nav-top'), (g.querySelector('[data-view="calls"]') ? nFb : 0) + (g.querySelector('[data-view="review"]') ? nApp : 0), '待處理'));
+    const bell = $('bellBtn');
+    if (bell) { bell.querySelector('.nav-badge')?.remove(); if (total) bell.insertAdjacentHTML('beforeend', `<span class="nav-badge">${total}</span>`); bell.classList.toggle('ring', fresh.length > 0); bell.title = total ? `待處理 ${total} 件（申請 ${nApp}、反映 ${nFb}）` : '目前沒有待處理的事項'; }
+    document.title = `${total ? `(${total}) ` : ''}臨床教師認證`;
+    // 新項目：本次登入第一次看到、或兩次更新之間又多了 → 提示
+    const newest = items[0] && items[0].at;
+    if (fresh.length && newest && newest !== state.lastAlertAt) {
+      if (state.lastAlertAt !== undefined || !state.alertToasted) toast(`有 ${fresh.length} 件新的待處理事項（認證申請 ${fresh.filter(x => x.kind === 'app').length}、線上反映 ${fresh.filter(x => x.kind === 'fb').length}），請點右上角鈴鐺查看。`);
+      if (state.lastAlertAt !== undefined && 'Notification' in window && Notification.permission === 'granted') { try { new Notification('臨床教師認證：有新的待處理事項', { body: items[0].title + '｜' + items[0].sub }); } catch (e) { /* 不支援時略過 */ } }
+      state.alertToasted = true;
+    }
+    state.lastAlertAt = newest || null;
+    if ($('bellPanel') && !$('bellPanel').hidden) drawBell();
   } catch (e) { /* 讀不到時不顯示 */ }
 }
+function drawBell() {
+  const A = state.alerts || { items: [], nApp: 0, nFb: 0 }, seen = getSeen();
+  const when = t => new Date(t).toLocaleString('zh-TW', { hour12: false, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  $('bellPanel').innerHTML = `<div class="bell-head"><b>待處理事項</b><span>${isAdmin() ? `認證申請 <b>${A.nApp}</b>・` : ''}線上反映 <b>${A.nFb}</b></span></div>
+    ${A.items.length ? `<ul class="bell-list">${A.items.map((x, i) => `<li><button type="button" class="${x.at > seen ? 'new' : ''}" onclick="bellGo(${i})">
+      <span class="pill ${x.kind === 'app' ? 'eligible' : 'expiring'}">${x.kind === 'app' ? '認證申請' : '線上反映'}</span>${x.at > seen ? '<span class="bell-new">新</span>' : ''}
+      <b>${esc(x.title)}</b><small>${esc(x.sub)}</small><small>${when(x.at)}</small></button></li>`).join('')}</ul>` : '<div class="empty">目前沒有待處理的事項</div>'}
+    <div class="bell-foot"><button class="btn-link" type="button" onclick="setSeen(new Date().toISOString());navBadge();drawBell()">全部標為已看過</button>
+      ${'Notification' in window && Notification.permission === 'default' ? '<button class="btn-link" type="button" onclick="Notification.requestPermission().then(()=>drawBell())">開啟桌面通知</button>' : ''}</div>`;
+}
+function toggleBell(e) {
+  e.stopPropagation(); closeNav();
+  const p = $('bellPanel'); p.hidden = !p.hidden;
+  if (!p.hidden) drawBell();
+}
+function closeBell() { if ($('bellPanel')) $('bellPanel').hidden = true; }
+function bellGo(i) { const x = (state.alerts.items || [])[i]; closeBell(); if (x) go(x.view); }
 // 師培中心處理線上反映
 async function feedbackInbox() {
   const { data, error } = await sb.from('feedback').select('*, who:staff!feedback_emp_id_fkey(dept)').order('created_at', { ascending: false }).limit(200);

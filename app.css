@@ -693,6 +693,39 @@ td input[type=checkbox], th input[type=checkbox] { width: 18px; height: 18px; ma
 .act-way { display: flex; width: 100%; margin-bottom: 10px; } .act-way button { flex: 1; font-size: 13px; }
 
 /* ---------- 護理主管：提報列、單位師生比 ---------- */
+/* ---------- 上排選單分組（下拉） ---------- */
+.nav-grp { position: relative; }
+.nav-grp .nav-top { display: inline-flex; align-items: center; gap: 4px; }
+.nav-grp.is-active > .nav-top { background: rgba(255,255,255,.16); color: #fff; }
+.nav-caret { font-size: 11px; opacity: .8; }
+.nav-menu { display: none; position: absolute; top: calc(100% + 6px); left: 0; z-index: 30; min-width: 150px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 30px rgba(22,70,97,.18); padding: 6px; flex-direction: column; gap: 2px; }
+.nav-grp.open > .nav-menu { display: flex; }
+.nav .nav-menu button { color: var(--text); text-align: left; white-space: nowrap; }
+.nav .nav-menu button:hover { background: var(--bg); }
+.nav .nav-menu button.is-active { background: var(--primary-light); color: var(--primary-dark); }
+/* ---------- 提醒鈴鐺 ---------- */
+.bell-wrap { position: relative; }
+.bell { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border: 1px solid rgba(255,255,255,.4); border-radius: 50%; background: transparent; color: #fff; cursor: pointer; }
+.bell .nav-badge { position: absolute; top: -6px; right: -8px; margin: 0; }
+.bell.ring svg { animation: bell-ring 1.2s ease-in-out 3; transform-origin: 50% 10%; }
+@keyframes bell-ring { 0%, 100% { transform: rotate(0); } 20% { transform: rotate(14deg); } 40% { transform: rotate(-12deg); } 60% { transform: rotate(8deg); } 80% { transform: rotate(-4deg); } }
+@media (prefers-reduced-motion: reduce) { .bell.ring svg { animation: none; } }
+.bell-panel { position: absolute; right: 0; top: calc(100% + 8px); z-index: 40; width: min(380px, calc(100vw - 32px)); max-height: 70vh; overflow: auto; background: var(--card); color: var(--text); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 12px 34px rgba(22,70,97,.22); }
+.bell-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--line); font-size: 14px; }
+.bell-list { list-style: none; margin: 0; padding: 4px; }
+.bell-list button { display: grid; grid-template-columns: auto auto 1fr; gap: 2px 8px; align-items: center; width: 100%; border: 0; background: transparent; padding: 8px 10px; border-radius: 8px; text-align: left; font: inherit; color: inherit; cursor: pointer; }
+.bell-list button:hover { background: var(--bg); } .bell-list button.new { background: #FFF8E6; }
+.bell-list button small { grid-column: 1 / -1; color: var(--muted); font-size: 12.5px; }
+.bell-new { color: var(--crimson); font-weight: 700; font-size: 12px; }
+.bell-foot { display: flex; justify-content: space-between; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--line); }
+/* ---------- 認證旅程：點人像／點數展開上課明細 ---------- */
+.jr-click { cursor: pointer; } .jr-click:hover, .jr-click:focus-visible { outline: 2px dashed var(--secondary); outline-offset: 4px; border-radius: 8px; }
+.jr-tip { margin-left: 8px; font-weight: 400; color: var(--muted); font-size: 12.5px; }
+.jr-detail { margin-top: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
+.jr-detail > summary { padding: 10px 14px; cursor: pointer; font-weight: 700; color: var(--primary); }
+.jr-detail > summary small { margin-left: 8px; font-weight: 400; color: var(--muted); }
+.jr-detail > .table-wrap, .jr-detail > .empty, .jr-detail > .hint { margin: 0 12px 10px; }
+.jr-year { display: flex; align-items: baseline; gap: 10px; margin: 8px 14px 4px; } .jr-year small { color: var(--muted); }
 .nb-tree { border: 1px solid var(--line); border-radius: 10px; margin: 8px 0; background: var(--card); }
 .nb-tree > summary { display: grid; grid-template-columns: minmax(0, 16em) 1fr 3.6em; grid-template-areas: "l t n" "s s s"; align-items: center; gap: 4px 10px; padding: 10px 14px; cursor: pointer; list-style: none; border-radius: 10px; }
 .nb-tree > summary::-webkit-details-marker { display: none; }
