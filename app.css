@@ -787,3 +787,11 @@ td.warn { color: var(--crimson); font-weight: 700; }
 .uf-list { max-height: 50vh; overflow: auto; border: 1px solid var(--line); border-radius: 10px; padding: 4px; }
 .uf-item { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; margin: 0; font-weight: 400; cursor: pointer; }
 .uf-item:hover { background: var(--bg); } .uf-item input { width: auto; margin: 0; } .uf-item small { color: var(--muted); }
+/* 網站版本紀錄 */
+.ver-list { list-style: none; margin: 0; padding: 0; max-height: 65vh; overflow: auto; }
+.ver-list > li { padding: 10px 0; border-bottom: 1px solid #e5e9ee; }
+.ver-list > li:last-child { border-bottom: 0; }
+.ver-list .ver-h { margin-bottom: 4px; }
+.ver-list .ver-h code { font-size: .85em; color: #667; }
+.ver-list ul { margin: 0; padding-left: 1.3em; line-height: 1.7; }
+.ver-list > li.cur .ver-h b { color: #164661; }

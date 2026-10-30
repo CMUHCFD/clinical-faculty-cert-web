@@ -5,6 +5,8 @@
 const sb = supabase.createClient(window.APP_CONFIG.url, window.APP_CONFIG.anonKey);
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+// 放進 onclick 等屬性裡的 JS 字串：屬性值會先被解碼，單靠 esc 擋不住引號，須先 JSON 化再 esc
+const jsq = s => esc(JSON.stringify(String(s ?? '')));
 const emailOf = emp => `${emp.trim().toLowerCase()}@staff.invalid`;
 const state = { me: null, role: 'general', view: null, list: null, regime: 'legacy', rules: null, qrTimer: null };
 
@@ -663,6 +665,34 @@ function recordsTable(records, info, ref) {
       ${counted.map(line).join('')}${rows.filter(r => !counted.includes(r)).map(line).join('')}</tbody></table></div>` : '<div class="empty">沒有修課紀錄</div>'}
     <div class="note">綠底為計入本次採計的課程，排在最前面；灰字為期間外或不屬於教學能力提升的課程。線上課程每年至多採認 1 點，所以這裡的合計可能略高於系統採計的點數。</div>`;
 }
+// ───────── 網站版本紀錄（頁尾「版本紀錄」，師培中心人員可看）；更新程式時在最前面加一筆，並同步 index.html 的 ?v= ─────────
+const SITE_VERSIONS = [
+  ['20261030a', '2026-10-30', ['資安修補：使用紀錄頁的程式碼注入漏洞、錯誤次數鎖定改為原子操作（須執行 016 並重新部署 activate、lookup）、管理者帳號不能只憑身分證字號重設密碼', '外部程式庫固定版本並加上完整性檢查', '頁尾新增網站版本與版本紀錄']],
+  ['20261028a', '2026-10-28', ['認證旅程：點人像或點數小路展開計入的上課明細', '上排選單依性質收成下拉分組', '右上角提醒鈴鐺：待審申請、待處理反映，每 2 分鐘更新，可開桌面通知']],
+  ['20261027b', '2026-10-27', ['兒童醫院 12 個單位授權給負責督導；單位樹狀清單上限放寬到 15 個單位']],
+  ['20261027a', '2026-10-27', ['護理主管可指定多個單位（門診五單位）', '多單位時以樹狀展開各單位人員']],
+  ['20261022', '2026-10-22', ['審查頁勾選批次核准並下載醫策會上傳檔', '一般醫學 11 項課程歸類', '護理部概況「選擇要看的單位」', '新制改由各職類提報，停用個人申請', '線上反映可直接回覆，本人頁顯示師培中心回覆']],
+  ['20261021', '2026-10-21', ['護理長、督導專用介面（只看自己單位）與提報給師培中心', '個人申請認證（舊制）', '醫策會認證證明下載指引', '新舊制銜接說明']],
+  ['20261020', '2026-10-20', ['護理部概況（取代 Power BI）', '員工編號＋身分證後 4 碼登入', '護理主管預先授權']],
+  ['20261014', '2026-10-14', ['課程辦理頁加入課程滿意度']],
+  ['20261013', '2026-10-13', ['我的認證旅程、學習偏好軌跡', '完成率頁與批次寄信提醒', '師生比多月份分析']],
+  ['20261012', '2026-10-12', ['來電紀錄、線上問題反映', '使用紀錄（管理者）', '課程辦理統計（承辦人看自己的課）', '教職 3 年 16 小時']],
+  ['20261007', '2026-10-07', ['顯示姓名、職類管理人與監測單位', '訓練計畫書', '他院轉任申請', '醫策會上傳檔依衛福部範本']],
+  ['20261006', '2026-10-06', ['免登入查詢自己的進度', '身分與應完成項目、新制四宮格']],
+  ['20261002', '2026-10-02', ['網站上線：認證狀態查詢、課程、簽到、申請與審查']],
+];
+const SITE_VERSION = SITE_VERSIONS[0][0];
+function showVersions() {
+  let dlg = $('verDlg');
+  if (!dlg) { dlg = document.createElement('dialog'); dlg.id = 'verDlg'; document.body.appendChild(dlg); dlg.addEventListener('click', e => { if (e.target === dlg) dlg.close(); }); }
+  dlg.innerHTML = `<div class="dlg-body">
+    <div class="dlg-head"><h3>網站版本紀錄</h3><button class="btn btn-ghost" type="button" onclick="$('verDlg').close()">關閉</button></div>
+    <ol class="ver-list">${SITE_VERSIONS.map(([v, d, items], i) => `<li${i ? '' : ' class="cur"'}><div class="ver-h"><b>${esc(d)}</b> <code>${esc(v)}</code>${i ? '' : ' <span class="pill valid">目前版本</span>'}</div>
+      <ul>${items.map(t => `<li>${esc(t)}</li>`).join('')}</ul></li>`).join('')}</ol></div>`;
+  dlg.showModal();
+}
+if ($('siteVer')) $('siteVer').textContent = SITE_VERSION;
+
 async function showRecords(empId) {
   const lists = [state.viewList, state.list, ...Object.values(state.alts || {})].filter(Boolean);
   const info = lists.map(l => l.find(r => r.emp_id === empId)).find(Boolean);
@@ -676,7 +706,7 @@ async function showRecords(empId) {
     <div class="dlg-head"><h3>修課紀錄｜員工編號 ${empLabel(empId)}　<small>${esc(info.dept || '')}・${esc(profGroup(info))}</small></h3><button class="btn btn-ghost" type="button" onclick="$('recDlg').close()">關閉</button></div>
     <div class="rule">${esc(info.status || '')}　系統採計教學點數 <b class="num">${esc(info.teach)}</b> / ${esc(info.need)}</div>
     ${error ? `<div class="empty">載入失敗：${esc(error.message)}</div>` : recordsTable(data, info, state.viewRef)}
-    <div style="margin-top:10px"><button class="btn btn-ghost" type="button" onclick="$('recDlg').close();go('person','${esc(empId)}')">開啟這位同仁的完整頁面</button></div></div>`;
+    <div style="margin-top:10px"><button class="btn btn-ghost" type="button" onclick="$('recDlg').close();go('person',${jsq(empId)})">開啟這位同仁的完整頁面</button></div></div>`;
 }
 
 const pecEx = emp => (state.pecEx || {})[emp];
@@ -783,6 +813,7 @@ async function boot() {
   renderNav(views);
   if ($('empSearch')) $('empSearch').hidden = !(isCfd() || state.role === 'dept_coordinator');
   if ($('bellBtn')) $('bellBtn').hidden = !isCfd();
+  if ($('verBtn')) $('verBtn').hidden = !isCfd();
   if (isCfd()) { navBadge(); clearInterval(state.alertT); state.alertT = setInterval(navBadge, 120e3); }
 
   // 掃描簽到 QR 進來的連結：登入後直接完成簽到
@@ -1288,8 +1319,8 @@ function seniorityForm(d, empId) {
         <b>曾取得臨床教師認證者已自動視為符合，不必登錄。</b>查證後可在此登錄實際的教學醫院年資（可含他院），系統取較大者。</p>
       <label>教學醫院年資（年）<input id="senY" type="number" step="0.1" min="0" max="60" value="${esc(s.override || '')}"></label>
       <label>依據（例如：再到職前任職 101/3–106/8、○○醫院 2 年）<input id="senN" maxlength="100" value="${esc(s.note || '')}"></label>
-      <button class="btn btn-primary" style="width:auto" type="button" onclick="setSeniority('${esc(empId)}', false)">採認並重新計算</button>
-      ${s.override ? `<button class="btn btn-ghost" style="width:auto" type="button" onclick="setSeniority('${esc(empId)}', true)">取消採認</button>` : ''}
+      <button class="btn btn-primary" style="width:auto" type="button" onclick="setSeniority(${jsq(empId)}, false)">採認並重新計算</button>
+      ${s.override ? `<button class="btn btn-ghost" style="width:auto" type="button" onclick="setSeniority(${jsq(empId)}, true)">取消採認</button>` : ''}
     </div></details>`;
 }
 function setSeniority(empId, remove, years, note) {
@@ -1329,10 +1360,10 @@ function personHTML(o) {
       ${pecEx(empId) ? `<div class="attention">醫策會不受理本院提報：${esc(pecEx(empId).reason)}（${esc(pecEx(empId).at)} 標記）。${own ? '如資料有誤，請洽師培中心。' : ''}</div>` : ''}
       ${o.admin && certTrack ? seniorityForm(d, empId) : ''}
       ${o.admin && certTrack ? (pecEx(empId)
-        ? `<button class="btn btn-ghost" type="button" onclick="togglePec('${esc(empId)}', true)">取消標記，恢復列入醫策會提報</button>`
+        ? `<button class="btn btn-ghost" type="button" onclick="togglePec(${jsq(empId)}, true)">取消標記，恢復列入醫策會提報</button>`
         : `<details class="apply"><summary class="btn btn-ghost" style="width:auto">標記為醫策會不受理（不列入提報）</summary>
             <div class="inline-form"><label>原因<select id="pecReason"><option>執業登記不在本院</option><option>年資不符醫策會規定</option><option>醫策會退件（其他原因）</option></select></label>
-            <button class="btn btn-primary" style="width:auto" type="button" onclick="togglePec('${esc(empId)}', false)">確認標記</button></div></details>`) : ''}
+            <button class="btn btn-primary" style="width:auto" type="button" onclick="togglePec(${jsq(empId)}, false)">確認標記</button></div></details>`) : ''}
     </section>`;
 
   // 下一步：把「現在該做什麼」放在結論之後、細節之前
@@ -1361,7 +1392,7 @@ function personHTML(o) {
   else nextBody = `<ul class="recs">${gaps.map(g => `<li>${esc(g)}</li>`).join('')}</ul><p>${deadline}</p>
     ${useful.length ? `<div class="group-label">近期可報名、會計入教學能力提升的課程</div>
       ${useful.map(c => `<div class="next-course"><div><b>${esc(c.title)}</b><br><small>${esc(c.course_date)} ${esc((c.start_time || '').slice(0, 5))}｜${Number(c.hours)} 點${(c.sub_categories || []).length ? '｜' + esc(c.sub_categories.join('、')) : ''}</small></div>
-        ${own && !o.lookup ? (regd.has(c.id) ? '<span class="pill expiring">已報名</span>' : `<button class="btn btn-primary" style="width:auto" type="button" onclick="act('course.register',{course_id:'${esc(c.id)}'},()=>renderPerson('${esc(empId)}'))">報名</button>`) : ''}</div>`).join('')}`
+        ${own && !o.lookup ? (regd.has(c.id) ? '<span class="pill expiring">已報名</span>' : `<button class="btn btn-primary" style="width:auto" type="button" onclick="act('course.register',{course_id:${jsq(c.id)}},()=>renderPerson(${jsq(empId)}))">報名</button>`) : ''}</div>`).join('')}`
       : `<p class="hint">目前沒有開放報名的教學能力提升課程；有新課程時會出現在${o.lookup ? '登入後的' : ''}「課程」頁。</p>`}`;
   const next = `<section class="card next"><h3>下一步</h3>${nextBody}</section>`;
 
@@ -1809,7 +1840,7 @@ async function feedbackInbox() {
     <div class="fb-msg">${x.category ? `<span class="org-tag dept">${esc(x.category)}</span> ` : ''}${esc(x.message)}</div>
     ${x.status === '待處理'
       ? `<div class="fb-reply"><textarea id="fbR-${Number(x.id)}" rows="2" maxlength="2000" placeholder="回覆內容（同仁登入後在「我的認證」看得到；已電話回覆也可簡單註記）"></textarea>
-        <div class="fb-reply-btns"><button class="btn btn-ghost" type="button" onclick="go('person','${esc(x.emp_id)}')">看個人頁</button>
+        <div class="fb-reply-btns"><button class="btn btn-ghost" type="button" onclick="go('person',${jsq(x.emp_id)})">看個人頁</button>
         <button class="btn btn-primary" type="button" onclick="feedbackDone(${Number(x.id)})">送出回覆</button></div></div>`
       : (x.reply ? `<div class="fb-replied">回覆：${esc(x.reply)}<small>${x.handled_at ? when(x.handled_at) : ''}${x.handled_by ? `・${esc(nameOf(x.handled_by) || x.handled_by)}` : ''}</small></div>` : '')}</li>`;
   return `<section class="card ${pend.length ? 'attention-card' : ''}"><h3>線上反映（待處理 ${pend.length}）</h3>
@@ -1880,7 +1911,7 @@ async function renderLogs() {
     <section class="card"><h3>明細（${logs.length} 筆${logs.length >= 3000 ? '，僅顯示最近 3000 筆' : ''}）</h3>
       <div class="table-wrap"><table><thead><tr><th>時間</th><th>使用者</th><th>動作</th><th>對象</th><th>說明</th></tr></thead><tbody>
       ${logs.slice(0, 500).map(l => `<tr><td>${esc(fmtTime(l.at))}</td><td>${label(l.actor)}</td><td><span class="pill ${isType(l, 'lookup') ? 'valid' : isType(l, 'login') ? 'eligible' : isType(l, 'person') || isType(l, 'search') ? '' : 'expiring'}">${esc(l.action)}</span></td>
-        <td>${l.target && l.target !== l.actor ? `<button class="btn-link" type="button" onclick="go('person','${esc(l.target)}')">${label(l.target)}</button>` : (l.target === l.actor && !isType(l, 'login') ? '本人' : '')}</td>
+        <td>${l.target && l.target !== l.actor ? `<button class="btn-link" type="button" onclick="go('person',${jsq(l.target)})">${label(l.target)}</button>` : (l.target === l.actor && !isType(l, 'login') ? '本人' : '')}</td>
         <td class="reason">${esc(ROLE_LABEL[l.detail] || l.detail || '')}</td></tr>`).join('') || '<tr><td colspan="5" class="empty">沒有符合的紀錄</td></tr>'}</tbody></table></div>
       ${logs.length > 500 ? '<p class="hint">畫面顯示最近 500 筆，完整明細請下載 CSV。</p>' : ''}</section>`;
   $('lgType').onchange = e => { f.type = e.target.value; renderLogs(); };
@@ -1941,7 +1972,7 @@ async function renderCalls() {
         <button class="btn btn-ghost" type="button" id="cfCsv">下載 CSV</button></div>
       <div class="table-wrap"><table><thead><tr><th>時間</th><th>來電者</th><th>分機</th><th>類別</th><th>問題／回覆</th><th>狀態</th><th>接聽</th></tr></thead><tbody>
       ${rows.slice(0, 300).map(c => `<tr><td>${when(c.called_at)}</td>
-        <td><button class="btn-link" type="button" onclick="go('person','${esc(c.emp_id)}')">${esc(c.caller?.name || c.emp_id)}</button><br><small>${esc(c.emp_id)}｜${esc(c.caller?.dept || '')}</small></td>
+        <td><button class="btn-link" type="button" onclick="go('person',${jsq(c.emp_id)})">${esc(c.caller?.name || c.emp_id)}</button><br><small>${esc(c.emp_id)}｜${esc(c.caller?.dept || '')}</small></td>
         <td class="num">${esc(c.ext)}</td><td>${esc(c.category || '')}</td>
         <td class="reason">${esc(c.question || '')}${c.answer ? `<br><small>回覆：${esc(c.answer)}</small>` : ''}</td>
         <td>${c.status === '待回電' ? `<span class="pill expiring">待回電</span><br><button class="btn-link" type="button" onclick="callDone(${Number(c.id)})">標為已回覆</button>` : '<span class="pill valid">已回覆</span>'}</td>
@@ -1961,7 +1992,7 @@ async function renderCalls() {
     if (!s) { $('cWho').innerHTML = `<span class="warn-text">查無員工編號「${esc(q)}」，請再確認。</span>`; return; }
     $('cWho').innerHTML = `<div class="call-card tone-${esc(s.status_code)}"><b>${esc(s.staff?.name || '')}</b> ${esc(s.emp_id)}｜${esc(s.dept)}｜${esc(s.staff?.title || '')}
       <div>${esc(s.status)}${s.ve ? `｜效期至 ${esc(s.ve)}` : ''}｜點數 ${esc(s.teach)} / ${esc(s.need)}</div>
-      <button class="btn-link" type="button" onclick="go('person','${esc(s.emp_id)}')">開啟完整個人頁 →</button>
+      <button class="btn-link" type="button" onclick="go('person',${jsq(s.emp_id)})">開啟完整個人頁 →</button>
       ${(past || []).length ? `<div class="hint" style="margin:4px 0 0">過去來電 ${past.length} 次：${past.map(p => `${new Date(p.called_at).toLocaleDateString('zh-TW')} ${esc(p.category || '')}${p.status === '待回電' ? '（待回電）' : ''}`).join('；')}</div>` : ''}</div>`;
   }
   $('callForm').onsubmit = async e => {
@@ -2227,7 +2258,7 @@ async function renderPlanPage() {
     </div>
     <details class="plan-tlist"><summary>教師名單（${T.teachers.length} 人）：姓名、單位、職稱、認證效期、教學能力提升、核心教師、師培講師</summary>
       <div class="table-wrap"><table><thead><tr><th>姓名</th><th>員工編號</th><th>單位</th><th>職稱</th><th>認證效期至</th><th>教學能力提升</th><th>核心教師</th><th>師培講師</th></tr></thead><tbody>
-      ${T.teachers.slice(0, 500).map(t => `<tr><td>${esc(t.staff?.name || '')}</td><td><button class="btn-link" type="button" onclick="go('person','${esc(t.emp_id)}')">${esc(t.emp_id)}</button></td><td>${esc(t.dept)}</td><td>${esc(t.staff?.title || '')}</td>
+      ${T.teachers.slice(0, 500).map(t => `<tr><td>${esc(t.staff?.name || '')}</td><td><button class="btn-link" type="button" onclick="go('person',${jsq(t.emp_id)})">${esc(t.emp_id)}</button></td><td>${esc(t.dept)}</td><td>${esc(t.staff?.title || '')}</td>
         <td>${esc(t.ve || (t.track_type === 'physician' ? '本年度達標' : ''))}</td><td class="num">${n(t.teach)}</td><td>${(t.core || []).length ? [...new Set(t.core.map(x => x.item))].map(esc).join('、') : ''}</td><td class="num">${Number(t.lect) > 0 ? n(t.lect) + ' 小時' : ''}</td></tr>`).join('')}
       </tbody></table></div>${T.teachers.length > 500 ? '<p class="hint">僅顯示前 500 人，完整名單請按「下載教師名單」。</p>' : ''}
       <button class="btn btn-ghost" type="button" id="planTeacherCsv">下載教師名單（CSV）</button></details></div>`;
@@ -2340,9 +2371,9 @@ async function renderList() {
     rows = [...rows].sort((a, b) => (ORDER[a.status_code] ?? 9) - (ORDER[b.status_code] ?? 9));
     $('fN').textContent = `${rows.length} / ${list.length} 人${rows.length > 300 ? '（顯示前 300 筆，請用搜尋縮小範圍）' : ''}`;
     $('tb').innerHTML = rows.slice(0, 300).map(r => `<tr>
-      <td><button class="btn-link" type="button" onclick="go('person','${esc(r.emp_id)}')">${empLabel(r.emp_id)}</button>${pecTag(r.emp_id)}${r.on_plan ? ' <span class="pill eligible" title="列入本年度追蹤名單">追蹤</span>' : ''}</td>
+      <td><button class="btn-link" type="button" onclick="go('person',${jsq(r.emp_id)})">${empLabel(r.emp_id)}</button>${pecTag(r.emp_id)}${r.on_plan ? ' <span class="pill eligible" title="列入本年度追蹤名單">追蹤</span>' : ''}</td>
       <td>${esc(r.dept)}</td><td>${esc(r.staff?.title || '')}</td><td>${esc(profGroup(r))}</td>
-      <td class="num"><button class="btn-link" type="button" title="查看修課紀錄" onclick="showRecords('${esc(r.emp_id)}')">${esc(hoursOf(r))}</button> / ${esc(r.need)}</td>
+      <td class="num"><button class="btn-link" type="button" title="查看修課紀錄" onclick="showRecords(${jsq(r.emp_id)})">${esc(hoursOf(r))}</button> / ${esc(r.need)}</td>
       <td><span class="pill ${esc(r.status_code)}">${esc(r.status)}</span>${scorePill(r)}${r.valid_end ? `<br><small>至 ${esc(r.valid_end)}</small>` : ''}</td>
       <td class="reason">${esc(r.reason)}</td>
       <td>${r.new_ok === 'true' ? '<span class="pill valid">符合</span>' : r.new_ok === 'false' ? `<span class="pill expiring" title="${esc(r.new_reason)}">尚未符合</span>` : ''}</td>
@@ -2458,8 +2489,8 @@ async function renderNursing() {
   people.sort((a, b) => (a.dept || '').localeCompare(b.dept || '') || (a.ve || '9').localeCompare(b.ve || '9'));
   state.nbCan = people.filter(canSubmit).map(r => r.emp_id);
   const tag = (k, v) => v ? `<b>${esc(k)}</b> ${esc(v)}　<button class="btn-link" type="button" onclick="state.nf.${k === '單位' ? 'unit' : k === '能階' ? 'level' : 'status'}='';renderNursing()">✕</button>` : '';
-  const pRow = (r, withUnit = true) => `<tr><td>${canSubmit(r) ? `<input type="checkbox" aria-label="提報" ${state.nbSel.has(r.emp_id) ? 'checked' : ''} onchange="nbPick('${esc(r.emp_id)}',this.checked)">` : pending.has(r.emp_id) ? '<small class="muted">審核中</small>' : ''}</td>
-        <td><button class="btn-link" type="button" onclick="go('person','${esc(r.emp_id)}')">${empLabel(r.emp_id)}</button></td>${withUnit ? `<td>${esc(r.dept)}</td>` : ''}<td>${esc(r.staff?.title || '')}</td>
+  const pRow = (r, withUnit = true) => `<tr><td>${canSubmit(r) ? `<input type="checkbox" aria-label="提報" ${state.nbSel.has(r.emp_id) ? 'checked' : ''} onchange="nbPick(${jsq(r.emp_id)},this.checked)">` : pending.has(r.emp_id) ? '<small class="muted">審核中</small>' : ''}</td>
+        <td><button class="btn-link" type="button" onclick="go('person',${jsq(r.emp_id)})">${empLabel(r.emp_id)}</button></td>${withUnit ? `<td>${esc(r.dept)}</td>` : ''}<td>${esc(r.staff?.title || '')}</td>
         <td><span class="pill" style="background:${CLS[cls(r)][1]};color:${cls(r) === 'none' ? 'var(--text)' : '#fff'}">${CLS[cls(r)][0]}</span>${pending.has(r.emp_id) ? ' <span class="pill expiring">已提報・審核中</span>' : canSubmit(r) && cls(r) !== 'can' ? ' <span class="pill eligible">可提報展延</span>' : ''}</td><td>${esc(r.valid_end || '')}</td>
         <td class="num">${esc(r.teach)} / ${esc(r.need)}</td><td class="reason">${esc(r.reason)}</td></tr>`;
   const listTools = `<div class="filters" style="align-items:center">
@@ -2618,8 +2649,8 @@ async function renderProgress() {
       <div class="filters" style="align-items:center"><div class="seg">${[['todo', '未完成'], ['done', '已完成'], ['all', '全部']].map(([v, t]) => `<button type="button" class="${P.show === v ? 'is-active' : ''}" onclick="state.pg.show='${v}';state.pg.sel=new Set();renderProgress()">${t}</button>`).join('')}</div>
         <span class="hint" style="margin:0">勾選後可在下方寄信提醒、複製信箱或下載名單。</span></div>
       <div class="table-wrap"><table><thead><tr><th><input type="checkbox" aria-label="全選" ${allOn ? 'checked' : ''} onchange="pgAll(this.checked)"></th><th>員工編號</th><th>單位</th><th>職稱</th><th>點數</th><th>狀態</th><th>說明</th>${isAdmin() ? '<th>已提醒</th>' : ''}</tr></thead><tbody>
-      ${shown.slice(0, 1000).map(r => { const m = reminded.get(r.emp_id); return `<tr><td><input type="checkbox" ${P.sel.has(r.emp_id) ? 'checked' : ''} onchange="pgPick('${esc(r.emp_id)}',this.checked)"></td>
-        <td><button class="btn-link" type="button" onclick="go('person','${esc(r.emp_id)}')">${empLabel(r.emp_id)}</button></td><td>${esc(r.dept)}</td><td>${esc(r.staff?.title || '')}</td>
+      ${shown.slice(0, 1000).map(r => { const m = reminded.get(r.emp_id); return `<tr><td><input type="checkbox" ${P.sel.has(r.emp_id) ? 'checked' : ''} onchange="pgPick(${jsq(r.emp_id)},this.checked)"></td>
+        <td><button class="btn-link" type="button" onclick="go('person',${jsq(r.emp_id)})">${empLabel(r.emp_id)}</button></td><td>${esc(r.dept)}</td><td>${esc(r.staff?.title || '')}</td>
         <td class="num">${esc(hoursOf(r))} / ${esc(r.need)}</td><td><span class="pill ${esc(r.status_code)}">${esc(String(r.status || '').replace(/^[^\p{L}\p{N}]+/u, ''))}</span></td><td class="reason">${esc(r.reason)}</td>
         ${isAdmin() ? `<td>${m ? `${m.n} 次<br><small>${esc(fmtTime(m.last).split(' ')[0])}</small>` : '—'}</td>` : ''}</tr>`; }).join('') || '<tr><td colspan="8" class="empty">沒有人員</td></tr>'}
       </tbody></table></div>${shown.length > 1000 ? '<p class="hint">畫面顯示前 1000 人，請用上方單位篩選縮小範圍。</p>' : ''}</section>`;
@@ -2876,7 +2907,7 @@ async function renderExpiry() {
   const groups = {};
   cur.rows.forEach(r => { const g = profGroup(r); groups[g] = groups[g] || []; groups[g].push(r); });
   const chips = [['', '全部職類', cur.rows], ...Object.entries(groups).sort((a, b) => b[1].length - a[1].length).map(([g, v]) => [g, g, v])]
-    .map(([g, label, v]) => { const n = v.length, ok = v.filter(ready).length; return `<button type="button" class="chip ${ex.group === g ? 'is-active' : ''}" onclick="state.exp.group='${esc(g)}';state.exp.picked=new Set();renderExpiry()">
+    .map(([g, label, v]) => { const n = v.length, ok = v.filter(ready).length; return `<button type="button" class="chip ${ex.group === g ? 'is-active' : ''}" onclick="state.exp.group=${jsq(g)};state.exp.picked=new Set();renderExpiry()">
       <b>${esc(label)}</b><span class="num">${other ? `舊 ${ok}・新 ${okNew(v)}／${n} 人` : `${ok} / ${n} 已達標`}</span>
       <span class="bar"><i style="width:${n ? ok / n * 100 : 0}%;background:var(--success)"></i></span>
       ${other ? `<span class="bar"><i style="width:${n ? okNew(v) / n * 100 : 0}%;background:var(--secondary)"></i></span>` : ''}</button>`; }).join('');
@@ -2914,11 +2945,11 @@ async function renderExpiry() {
         ${other ? '<th>舊制點數</th><th>舊制</th><th>新制（基礎／進階）</th><th>新制</th>' : `<th>教學點數</th><th>缺口</th><th>狀態</th>${exportable ? '<th>提報效期</th>' : ''}`}</tr></thead><tbody>
       ${rows.slice(0, 500).map(r => { const o = other && other.get(r.emp_id); return `<tr class="${drop(r) ? 'row-drop' : ''}">
         <td>${canPick.length && r.can_apply ? `<input type="checkbox" class="pick" value="${esc(r.emp_id)}" ${ex.picked.has(r.emp_id) ? 'checked' : ''} aria-label="選取 ${esc(r.emp_id)}">` : ''}</td>
-        <td><button class="btn-link" type="button" onclick="go('person','${esc(r.emp_id)}')">${empLabel(r.emp_id)}</button>${pecTag(r.emp_id)}</td>
+        <td><button class="btn-link" type="button" onclick="go('person',${jsq(r.emp_id)})">${empLabel(r.emp_id)}</button>${pecTag(r.emp_id)}</td>
         <td>${esc(r.dept)}</td><td>${esc(r.staff?.title || '')}</td><td>${esc(profGroup(r))}</td><td>${esc(r.valid_end || '—')}</td>
-        ${other ? `<td class="num"><button class="btn-link" type="button" title="查看修課紀錄" onclick="showRecords('${esc(r.emp_id)}')">${esc(r.teach)}</button> / ${esc(r.need)}</td><td>${gap(r)}</td>
+        ${other ? `<td class="num"><button class="btn-link" type="button" title="查看修課紀錄" onclick="showRecords(${jsq(r.emp_id)})">${esc(r.teach)}</button> / ${esc(r.need)}</td><td>${gap(r)}</td>
             <td class="num">${o ? `<b>${esc(o.basic)}</b>／<b>${esc(o.adv)}</b>` : '—'}</td><td>${gap(o)}</td>`
-          : `<td class="num"><button class="btn-link" type="button" title="查看修課紀錄" onclick="showRecords('${esc(r.emp_id)}')">${esc(r.teach)}</button> / ${esc(r.need)}</td><td>${gap(r)}</td>
+          : `<td class="num"><button class="btn-link" type="button" title="查看修課紀錄" onclick="showRecords(${jsq(r.emp_id)})">${esc(r.teach)}</button> / ${esc(r.need)}</td><td>${gap(r)}</td>
             <td><span class="pill ${esc(r.status_code)}">${esc(r.status)}</span></td>
             ${exportable ? `<td class="num">${r.can_apply ? (p => `${p.start}–${p.end}`)(certPeriod(r, refDate)) : ''}</td>` : ''}`}
       </tr>`; }).join('')}</tbody></table></div>
@@ -2980,11 +3011,11 @@ async function renderCourses() {
       ${(c.sub_categories || []).length ? `<div class="course-tags">${c.sub_categories.map(s => `<span>${esc(s)}</span>`).join('')}</div>` : ''}
       ${open ? `<div class="course-meta">已報名 ${counts[c.id] ?? 0}${c.max_capacity ? ` / ${c.max_capacity}` : ''} 人</div>` : ''}
       <div class="course-actions">
-        ${open && !reg ? `<button class="btn btn-primary" style="width:auto" type="button" ${full ? 'disabled' : ''} onclick="act('course.register',{course_id:'${esc(c.id)}'},renderCourses)">${full ? '已額滿' : '報名'}</button>` : ''}
-        ${open && reg && !reg.checked_in_at ? `<button class="btn btn-ghost" type="button" onclick="act('course.cancel',{course_id:'${esc(c.id)}'},renderCourses)">取消報名</button>` : ''}
-        ${isAdmin() ? `<button class="btn btn-ghost" type="button" onclick="showQr('${esc(c.id)}')">簽到 QR</button>
-          <button class="btn btn-ghost" type="button" onclick="editCourse('${esc(c.id)}')">編輯</button>
-          <button class="btn btn-ghost" type="button" onclick="act('course.delete',{id:'${esc(c.id)}'},renderCourses)">刪除</button>` : ''}
+        ${open && !reg ? `<button class="btn btn-primary" style="width:auto" type="button" ${full ? 'disabled' : ''} onclick="act('course.register',{course_id:${jsq(c.id)}},renderCourses)">${full ? '已額滿' : '報名'}</button>` : ''}
+        ${open && reg && !reg.checked_in_at ? `<button class="btn btn-ghost" type="button" onclick="act('course.cancel',{course_id:${jsq(c.id)}},renderCourses)">取消報名</button>` : ''}
+        ${isAdmin() ? `<button class="btn btn-ghost" type="button" onclick="showQr(${jsq(c.id)})">簽到 QR</button>
+          <button class="btn btn-ghost" type="button" onclick="editCourse(${jsq(c.id)})">編輯</button>
+          <button class="btn btn-ghost" type="button" onclick="act('course.delete',{id:${jsq(c.id)}},renderCourses)">刪除</button>` : ''}
       </div></article>`;
   };
   const past = courses.filter(c => c.course_date < today());
@@ -3093,19 +3124,19 @@ async function renderReview() {
   const batchable = a => a.status === '審核中' && a.app_type !== '他院轉任採認' && !pecEx(a.emp_id);
   const row = a => `<tr>
     <td>${batchable(a) ? `<input type="checkbox" class="rv-pick" value="${esc(a.id)}" aria-label="勾選" onchange="rvCount()">` : ''}</td>
-    <td><button class="btn-link" type="button" onclick="go('person','${esc(a.emp_id)}')">${empLabel(a.emp_id)}</button><br><small>${esc(a.staff?.dept || '')}</small></td>
+    <td><button class="btn-link" type="button" onclick="go('person',${jsq(a.emp_id)})">${empLabel(a.emp_id)}</button><br><small>${esc(a.staff?.dept || '')}</small></td>
     <td>${esc(a.app_type)}<br><small>${esc(fmtTime(a.submitted_at))}${a.submitted_by && a.submitted_by !== a.emp_id ? `<br>由 ${esc(a.submitted_by)} 提報` : ''}</small></td>
     <td class="reason">${a.app_type === '他院轉任採認'
       ? `<span class="pill eligible">他院轉任・待查證</span><br>原認證醫院：<b>${esc(a.ext_org || '')}</b>${a.ext_cert_no ? `（證號 ${esc(a.ext_cert_no)}）` : ''}
         <br>原效期：${esc(a.ext_valid_start || '')}～${esc(a.ext_valid_end || '')}${a.ext_valid_end && a.ext_valid_end >= today() ? ' <span class="pill valid">仍有效・採認原效期</span>' : ' <span class="pill expiring">已屆滿・視為展延</span>'}
-        ${a.attachment_path ? `<br><button class="btn btn-ghost" type="button" style="margin-top:6px" onclick="viewCert('${esc(a.attachment_path)}')">查看證書</button>` : a.status !== '審核中' ? '<br><small>證書檔已於審查後刪除</small>' : ''}`
+        ${a.attachment_path ? `<br><button class="btn btn-ghost" type="button" style="margin-top:6px" onclick="viewCert(${jsq(a.attachment_path)})">查看證書</button>` : a.status !== '審核中' ? '<br><small>證書檔已於審查後刪除</small>' : ''}`
       : `<span class="pill ${a.auto_check?.eligible ? 'valid' : 'expired'}">系統檢核${a.auto_check?.eligible ? '符合' : '未符合'}</span>
       ${esc(a.auto_check?.reason || '')}<br>教學 ${esc(a.auto_check?.teaching)}・基礎 ${esc(a.auto_check?.basic)}・進階 ${esc(a.auto_check?.advanced)}（${esc(a.auto_check?.window || '')}）
       ${a.external_hours ? `<br>院外時數：${esc(a.external_hours)}` : ''}
-      ${Number(a.service_years) > 0 ? `<br>申報教學醫院年資：<b>${esc(a.service_years)}</b> 年${a.status === '審核中' ? ` <button class="btn-link" type="button" title="人事資料再到職或留停者年資會偏低；查證後可採認申報年資" onclick="setSeniority('${esc(a.emp_id)}', false, '${esc(a.service_years)}', '依認證申請表申報')">採認此年資</button>` : ''}` : ''}`}${a.memo ? `<br>備註：${esc(a.memo)}` : ''}</td>
+      ${Number(a.service_years) > 0 ? `<br>申報教學醫院年資：<b>${esc(a.service_years)}</b> 年${a.status === '審核中' ? ` <button class="btn-link" type="button" title="人事資料再到職或留停者年資會偏低；查證後可採認申報年資" onclick="setSeniority(${jsq(a.emp_id)}, false, ${jsq(a.service_years)}, '依認證申請表申報')">採認此年資</button>` : ''}` : ''}`}${a.memo ? `<br>備註：${esc(a.memo)}` : ''}</td>
     <td>${a.status === '審核中' ? `${periodInputs(a)}<input id="cm-${esc(a.id)}" placeholder="審查意見（選填）" style="width:150px"><br>
-        <button class="btn btn-primary" style="width:auto;padding:6px 12px" type="button" onclick="review('${esc(a.id)}',true)">核准</button>
-        <button class="btn btn-ghost" type="button" onclick="review('${esc(a.id)}',false)">退回</button>`
+        <button class="btn btn-primary" style="width:auto;padding:6px 12px" type="button" onclick="review(${jsq(a.id)},true)">核准</button>
+        <button class="btn btn-ghost" type="button" onclick="review(${jsq(a.id)},false)">退回</button>`
       : `<span class="pill ${a.status === '已通過' ? 'valid' : 'expired'}">${esc(a.status)}</span><br><small>${a.valid_start ? `${esc(a.valid_start)}～${esc(a.valid_end)}` : esc(a.review_comment || '')}</small>`}</td></tr>`;
   // 已核准、待上傳醫策會：依核准月份整理，一鍵產生上傳檔（效期用核准時寫入的效期）
   // 他院轉任採認的認證不是本院取得，不列入本院向衛福部申請的名單
@@ -3189,7 +3220,7 @@ async function renderRoster() {
       <div class="note">認證率的分母以各職類年度訓練計畫所列人員為準；離職、留停、職務異動者改狀態即可，不必刪除，會另行列示。</div></section>
     <section class="card"><h3>${year} 年度追蹤名單（${rows.length} 人）</h3><div class="table-wrap"><table>
       <thead><tr><th>員工編號</th><th>單位</th><th>職類</th><th>類別</th><th>列管狀態</th><th>目前認證狀態</th><th>備註</th><th></th></tr></thead><tbody>
-      ${rows.map(r => `<tr><td><button class="btn-link" type="button" onclick="go('person','${esc(r.emp_id)}')">${empLabel(r.emp_id)}</button></td>
+      ${rows.map(r => `<tr><td><button class="btn-link" type="button" onclick="go('person',${jsq(r.emp_id)})">${empLabel(r.emp_id)}</button></td>
         <td>${esc(r.staff?.dept || '')}</td><td>${esc(r.staff?.profession || '')}</td><td>${esc(r.monitor_type || '')}</td>
         <td><span class="pill ${r.status === '在職列管' ? 'valid' : ''}">${esc(r.status)}</span></td>
         <td class="reason">${esc(st.get(r.emp_id)?.status || '')}</td><td class="reason">${esc(r.notes || '')}</td>
