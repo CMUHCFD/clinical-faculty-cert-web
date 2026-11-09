@@ -127,9 +127,7 @@ function showLookup(r) {
   $('authView').hidden = true; $('appView').hidden = true; $('lookupView').hidden = false;
   $('lkWho').textContent = `${r.emp_id} ${r.name || ''}`;
   $('lkAsOf').textContent = fmtTime(r.row.computed_at);
-  const how = r.regime === 'new'
-    ? '新制的臨床教師認證由各職類每年提報名單，符合資格者不需要自行申請。'
-    : '符合資格者請登入系統，在「我的認證」按「申請臨床教師認證」。';
+  const how = SELF_APPLY_NOTE;
   // 結論放最前面，使用說明放最後
   $('lkContent').innerHTML = lookupHTML(r) + feedbackCard('lookup') +
     `<section class="card lk-note"><b>這是免登入的唯讀查詢。</b>${how}要報名課程或申請，請用同樣的員工編號＋身分證後 4 碼登入系統（不需要開通帳號）。
@@ -204,9 +202,7 @@ function lookupHTML(r) {
   // ---- 下一步
   let nextBody;
   if (pending) nextBody = '<p>您的認證申請正在審核中，暫時不需要其他動作。</p>';
-  else if (eligible) nextBody = `<p><b>您已符合資格。</b>${r.regime === 'new'
-    ? '新制的認證由各職類每年提報名單，您不需要自行申請；期中需要認證時，由主管於每季臨培暨師培會議提報。'
-    : '請登入本系統，在「我的認證」按「申請臨床教師認證」，由師培中心審查。'}</p>`;
+  else if (eligible) nextBody = `<p><b>您已符合資格。</b>${SELF_APPLY_NOTE}</p>`;
   else if (!gaps.length) nextBody = `<p>目前不需要補修。${cert ? `請留意效期 ${esc(cert.valid_end_roc)}。` : ''}</p>`;
   else nextBody = `<ul class="lk-gaps">${gaps.map(g => `<li>${esc(g)}</li>`).join('')}</ul>
     <p class="lk-sub">${cert ? `請在 ${esc(cert.valid_end_roc)} 前完成。` : certTrack ? '' : '請在今年 12 月 31 日前完成。'}可報名的課程請登入後到「課程」頁查看。</p>`;
@@ -386,45 +382,8 @@ function printCert() {
   w.document.close();
 }
 
-// 本人申請臨床教師認證：確認畫面（院外時數、備註選填）→ 送到師培中心「審查」
-function openApply(track) {
-  let dlg = $('applyDlg');
-  if (!dlg) { dlg = document.createElement('dialog'); dlg.id = 'applyDlg'; dlg.className = 'small-dlg'; document.body.appendChild(dlg); }
-  const C = state.applyCtx || {}, d = C.d || {};
-  const eligible = !!(d.initialEligible || d.renewalCompliant);
-  const n = v => Math.round((Number(v) || 0) * 10) / 10;
-  // ① 這次認證的效期（依核准日試算；舊制期間另列 116 年新制開始後核准的效期）
-  const cfg = (state.rules && state.rules.regime) || {};
-  const newFrom = cfg.new_from_year || 2027;
-  const per = (det, regime, ref) => certPeriod({ ve: det && det.activeCertificate ? det.activeCertificate.valid_end : null, le: det && det.lastCertificate ? det.lastCertificate.valid_end : null }, ref, regime);
-  const legacyNow = C.regime === 'legacy';
-  const pNow = per(legacyNow ? C.dl : (C.dn || d), C.regime, today());
-  const pNew = legacyNow && C.dn ? per(C.dn, 'new', `${newFrom - 1}-12-31`) : null;
-  const yrs = p => { const a = p.start.split('/').map(Number), b = p.end.split('/').map(Number); const m = (b[0] - a[0]) * 12 + b[1] - a[1] + 1; return m % 12 ? `${Math.floor(m / 12)} 年 ${m % 12} 個月` : `${m / 12} 年`; };
-  const period = `<div class="ap-period"><div><span>${legacyNow ? '現行舊制（現在核准）' : '新制'}</span><b>${esc(pNow.start)} － ${esc(pNow.end)}</b><small>約 ${yrs(pNow)}</small></div>
-    ${pNew ? `<div class="muted-box"><span>若 ${newFrom - 1911} 年新制開始後才核准</span><b>${esc(pNew.start)} － ${esc(pNew.end)}</b><small>約 ${yrs(pNew)}，效期一律到 12/31</small></div>` : ''}</div>
-    <p class="hint" style="margin:4px 0 0">實際效期以師培中心核准的日期為準。</p>`;
-  // ② 我的時數概況（本次採計期間）
-  const reqs = (d.requirements || []).filter(q => q.key !== 'makeup');
-  const hours = `<ul class="ap-req">${reqs.map(q => `<li class="${q.met ? 'met' : ''}"><span>${q.met ? '✓' : '○'} ${esc(q.label)}</span><b class="num">${n(q.have)} / ${n(q.need)} ${esc(q.unit)}</b></li>`).join('')}</ul>
-    ${d.seniorityDeemed ? '<p class="hint" style="margin:4px 0 0">教學醫院年資：你曾取得臨床教師認證，年資視為符合，不用另外證明。</p>' : ''}`;
-  dlg.innerHTML = `<form id="applyDlgForm" class="dlg-body"><h3>申請臨床教師認證（${track === 'renewal' ? '展延' : '新增'}）</h3>
-    <div class="group-label">這次認證的效期</div>${period}
-    <div class="group-label">我的時數概況</div>${hours}
-    ${eligible
-      ? '<p class="ap-ok">✓ 你的時數與資格都已符合，直接送出即可，不用填寫其他資料。</p>'
-      : '<p class="hint">目前系統計算尚未符合；若有院外師資培育課程，請填寫以便師培中心採計。</p><label>院外師資培育課程時數（課名、主辦單位、日期、時數）<input id="adExt" type="text"></label>'}
-    <label>備註（選填）<input id="adMemo" type="text"></label>
-    <div style="display:flex;gap:8px"><button class="btn btn-primary" style="width:auto" type="submit">確認送出</button><button class="btn btn-ghost" type="button" onclick="$('applyDlg').close()">取消</button></div></form>`;
-  dlg.showModal();
-  $('applyDlgForm').onsubmit = async e => {
-    e.preventDefault();
-    const btn = e.target.querySelector('[type=submit]'); btn.disabled = true; btn.textContent = '送出中…';
-    const d = await act('cert.apply', { emp_id: state.me.emp_id, external_hours: $('adExt') ? $('adExt').value : '', memo: $('adMemo').value || '本人申請' });
-    dlg.close();
-    if (d) { state.list = null; renderPerson(state.me.emp_id); }
-  };
-}
+// 個人提報認證已停用（使用者 2026-11-09 決定）：一律由單位／職類主管提報給師培中心，同仁本人不用送件
+const SELF_APPLY_NOTE = '臨床教師認證名單由所屬單位（職類）主管提報給師培中心，您不需要自行申請；如有疑問請洽單位主管或師培中心。';
 function simpleView(d, o = {}) {
   const n = v => Math.round((Number(v) || 0) * 10) / 10;
   const roc = s => s ? `${Number(s.slice(0, 4)) - 1911} 年 ${Number(s.slice(5, 7))} 月 ${Number(s.slice(8, 10))} 日` : '';
@@ -464,7 +423,7 @@ function simpleView(d, o = {}) {
   let next;
   if (d.trackType === 'exempt') next = '';
   else if (pending) next = '等通知就好。';
-  else if (eligible) next = o.regime === 'new' ? '你已符合資格；新制由各職類每年提報名單，不用自己送件。' : o.lookup ? '請用員工編號＋身分證後 4 碼登入，就可以按「申請」。' : '按下面的按鈕送出申請，師培中心審核後會通知你。';
+  else if (eligible) next = '你已符合資格；認證名單由單位主管提報給師培中心，不用自己送件。';
   else if (!todo.length) next = '目前不用再上課，繼續保持。';
   else next = `${deadline ? `請在 ${deadline}完成：` : '完成下面這些就可以申請：'}`;
   // ③ 我的學習路線（一句話）
@@ -487,10 +446,6 @@ function simpleView(d, o = {}) {
       <div class="sv-big">${esc(big)}</div>${sub ? `<p class="sv-sub">${esc(sub)}</p>` : ''}
       ${path}
       ${next || todo.length ? `<div class="sv-todo"><b>${esc(next)}</b>${todo.length && !eligible && !pending ? `<ul>${todo.slice(0, 3).map(t => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}</div>` : ''}
-      ${certTrack && !pending && o.self && o.regime !== 'new' ? (eligible
-        ? `<button class="btn btn-primary sv-apply" type="button" onclick="openApply('${d.trackType}')">申請臨床教師認證（${d.trackType === 'renewal' ? '展延' : '新增'}）</button>`
-        : `<p class="sv-alt"><button class="btn-link" type="button" onclick="openApply('${d.trackType}')">有院外師資培育時數？仍可提出申請 →</button></p>`) : ''}
-      ${certTrack && !pending && eligible && o.lookup && o.regime !== 'new' ? '<button class="btn btn-primary sv-apply" type="button" onclick="endLookup();setTab(\'login\')">登入後申請</button>' : ''}
       ${certTrack && (cert || d.lastCertificate) && (o.self || o.lookup) ? pecCertBox(o.name) : ''}
       ${certTrack && o.self && cert && cert.source !== 'external' && ((state.rules || {}).certificate || {}).enabled ? '<button class="btn btn-ghost sv-cert" type="button" onclick="printCert()">列印本院臨床教師證書</button>' : ''}
     </section>${certTrack ? transitionCard(d) : ''}${route}
@@ -667,6 +622,7 @@ function recordsTable(records, info, ref) {
 }
 // ───────── 網站版本紀錄（頁尾「版本紀錄」，師培中心人員可看）；更新程式時在最前面加一筆，並同步 index.html 的 ?v= ─────────
 const SITE_VERSIONS = [
+  ['20261109a', '2026-11-09', ['停用個人提報認證：同仁本人頁與免登入查詢不再有「申請」按鈕，認證名單一律由單位（職類）主管或師培中心提報（伺服器同步擋下）']],
   ['20261030a', '2026-10-30', ['資安修補：使用紀錄頁的程式碼注入漏洞、錯誤次數鎖定改為原子操作（須執行 016 並重新部署 activate、lookup）、管理者帳號不能只憑身分證字號重設密碼', '外部程式庫固定版本並加上完整性檢查', '頁尾新增網站版本與版本紀錄']],
   ['20261028a', '2026-10-28', ['認證旅程：點人像或點數小路展開計入的上課明細', '上排選單依性質收成下拉分組', '右上角提醒鈴鐺：待審申請、待處理反映，每 2 分鐘更新，可開桌面通知']],
   ['20261027b', '2026-10-27', ['兒童醫院 12 個單位授權給負責督導；單位樹狀清單上限放寬到 15 個單位']],
@@ -1346,10 +1302,10 @@ function personHTML(o) {
       <div class="rule">員工編號 ${o.lookup ? `${esc(empId)} <span class="nm">${esc(o.name || '')}</span>` : empLabel(empId)}｜${esc(staff?.dept || '')}｜${esc(staff?.title || '')}｜${esc(staff?.profession || '')}${cert ? `｜認證效期 ${esc(cert.valid_start_roc)}–${esc(cert.valid_end_roc)}${cert.extended_from ? `（原至 ${esc(cert.extended_from_roc)}，依過渡規定延至年底）` : ''}` : ''}</div>
       <div class="reason">${esc(d.statusReason)}</div>
       ${(d.recommendations || []).length ? `<ul class="recs">${d.recommendations.map(r => `<li>${esc(r)}</li>`).join('')}</ul>` : ''}
-      ${certTrack && canAct && !pending && (o.regime === 'legacy' || o.role !== 'general') ? `<details class="apply"><summary class="btn ${d.initialEligible || d.renewalCompliant ? 'btn-primary' : 'btn-ghost'}" style="width:auto">${
+      ${certTrack && canAct && !pending && o.role !== 'general' ? `<details class="apply"><summary class="btn ${d.initialEligible || d.renewalCompliant ? 'btn-primary' : 'btn-ghost'}" style="width:auto">${
           d.initialEligible || d.renewalCompliant
-            ? `${own ? '申請' : '代為提報'}臨床教師認證（${d.trackType === 'renewal' ? '展延' : '新增'}）`
-            : '點數尚未達標；若另有院外修課時數，可按此提出申請'}</summary>
+            ? `代為提報臨床教師認證（${d.trackType === 'renewal' ? '展延' : '新增'}）`
+            : '點數尚未達標；若另有院外修課時數，可按此代為提報'}</summary>
         <form id="applyForm" class="inline-form">
           <label>教學醫院服務年資（展延免填）<input id="apYears" type="number" step="0.1" min="0" value="${d.trackType === 'renewal' ? '' : esc(d.seniority)}"></label>
           <label>院外師資培育課程時數（選填：課名、主辦單位、日期、時數）<input id="apExt" type="text"></label>
@@ -1381,13 +1337,7 @@ function personHTML(o) {
   const who = own ? '您' : '這位同仁';
   let nextBody;
   if (pending) nextBody = `<p>${who}的認證申請正在審核中，暫時不需要其他動作。</p>`;
-  else if (eligible && o.lookup) nextBody = `<p><b>您已符合資格。</b>${o.regime === 'new'
-      ? '新制的認證由各職類每年提報名單，您不需要自行申請；期中需要認證時，由主管於每季臨培暨師培會議提報。'
-      : '請登入本系統，在「我的認證」按「申請臨床教師認證」，由師培中心審查。'}</p>`;
-  else if (eligible) nextBody = `<p><b>${who}已符合資格。</b>${
-      o.regime === 'new'
-        ? (own && o.role === 'general' ? '新制的認證由各職類每年提報名單，您不需要自行申請；期中需要認證時，由主管於每季臨培暨師培會議提報。' : '請在上方按「代為提報」，名單會送到師培中心。')
-        : (own ? '可以直接在上方按「申請臨床教師認證」，由師培中心審查。' : '可以在上方按「代為提報」，或請同仁自行申請。')}</p>`;
+  else if (eligible) nextBody = `<p><b>${who}已符合資格。</b>${o.lookup || o.role === 'general' ? SELF_APPLY_NOTE : '請在上方按「代為提報」，名單會送到師培中心。'}</p>`;
   else if (!gaps.length) nextBody = `<p>目前不需要補修。${cert ? `認證效期至 ${esc(cert.valid_end_roc)}。` : ''}</p>`;
   else nextBody = `<ul class="recs">${gaps.map(g => `<li>${esc(g)}</li>`).join('')}</ul><p>${deadline}</p>
     ${useful.length ? `<div class="group-label">近期可報名、會計入教學能力提升的課程</div>
@@ -1451,7 +1401,7 @@ function personHTML(o) {
     + block('records', appList + recs);   // 結論 → 我的身分要完成什麼 → 下一步 → 細節
   const fb = own && !o.lookup && !o.admin ? feedbackCard('login') : '';
   if (!simple) return full + fb;
-  if (own && !o.lookup) { state.applyCtx = { d, dl: row.detail, dn: row.detail_new, regime: o.regime }; state.certCtx = { d, staff: { ...(staff || {}), emp_id: empId } }; }   // 申請視窗、證書列印用
+  if (own && !o.lookup) { state.certCtx = { d, staff: { ...(staff || {}), emp_id: empId } }; }   // 證書列印用
   return simpleView(d, { records, apps, regime: o.regime, name: staff?.name || '', self: own && !o.lookup }) + `<div class="lk-more" ${simpleMode() ? 'hidden' : ''}>${full}</div>` + fb;
 }
 
