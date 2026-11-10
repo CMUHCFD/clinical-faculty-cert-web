@@ -622,6 +622,7 @@ function recordsTable(records, info, ref) {
 }
 // ───────── 網站版本紀錄（頁尾「版本紀錄」，師培中心人員可看）；更新程式時在最前面加一筆，並同步 index.html 的 ?v= ─────────
 const SITE_VERSIONS = [
+  ['20261110a', '2026-11-10', ['主管在「護理部概況」與人員頁不能把自己列入提報；本人的認證由上一層主管或師培中心提報（伺服器同步擋下）']],
   ['20261109a', '2026-11-09', ['停用個人提報認證：同仁本人頁與免登入查詢不再有「申請」按鈕，認證名單一律由單位（職類）主管或師培中心提報（伺服器同步擋下）']],
   ['20261030a', '2026-10-30', ['資安修補：使用紀錄頁的程式碼注入漏洞、錯誤次數鎖定改為原子操作（須執行 016 並重新部署 activate、lookup）、管理者帳號不能只憑身分證字號重設密碼', '外部程式庫固定版本並加上完整性檢查', '頁尾新增網站版本與版本紀錄']],
   ['20261028a', '2026-10-28', ['認證旅程：點人像或點數小路展開計入的上課明細', '上排選單依性質收成下拉分組', '右上角提醒鈴鐺：待審申請、待處理反映，每 2 分鐘更新，可開桌面通知']],
@@ -1302,7 +1303,7 @@ function personHTML(o) {
       <div class="rule">員工編號 ${o.lookup ? `${esc(empId)} <span class="nm">${esc(o.name || '')}</span>` : empLabel(empId)}｜${esc(staff?.dept || '')}｜${esc(staff?.title || '')}｜${esc(staff?.profession || '')}${cert ? `｜認證效期 ${esc(cert.valid_start_roc)}–${esc(cert.valid_end_roc)}${cert.extended_from ? `（原至 ${esc(cert.extended_from_roc)}，依過渡規定延至年底）` : ''}` : ''}</div>
       <div class="reason">${esc(d.statusReason)}</div>
       ${(d.recommendations || []).length ? `<ul class="recs">${d.recommendations.map(r => `<li>${esc(r)}</li>`).join('')}</ul>` : ''}
-      ${certTrack && canAct && !pending && o.role !== 'general' ? `<details class="apply"><summary class="btn ${d.initialEligible || d.renewalCompliant ? 'btn-primary' : 'btn-ghost'}" style="width:auto">${
+      ${certTrack && canAct && !pending && o.role !== 'general' && (empId !== state.me?.emp_id || isAdmin()) ? `<details class="apply"><summary class="btn ${d.initialEligible || d.renewalCompliant ? 'btn-primary' : 'btn-ghost'}" style="width:auto">${
           d.initialEligible || d.renewalCompliant
             ? `代為提報臨床教師認證（${d.trackType === 'renewal' ? '展延' : '新增'}）`
             : '點數尚未達標；若另有院外修課時數，可按此代為提報'}</summary>
@@ -1337,7 +1338,7 @@ function personHTML(o) {
   const who = own ? '您' : '這位同仁';
   let nextBody;
   if (pending) nextBody = `<p>${who}的認證申請正在審核中，暫時不需要其他動作。</p>`;
-  else if (eligible) nextBody = `<p><b>${who}已符合資格。</b>${o.lookup || o.role === 'general' ? SELF_APPLY_NOTE : '請在上方按「代為提報」，名單會送到師培中心。'}</p>`;
+  else if (eligible) nextBody = `<p><b>${who}已符合資格。</b>${o.lookup || o.role === 'general' || (empId === state.me?.emp_id && !isAdmin()) ? SELF_APPLY_NOTE : '請在上方按「代為提報」，名單會送到師培中心。'}</p>`;
   else if (!gaps.length) nextBody = `<p>目前不需要補修。${cert ? `認證效期至 ${esc(cert.valid_end_roc)}。` : ''}</p>`;
   else nextBody = `<ul class="recs">${gaps.map(g => `<li>${esc(g)}</li>`).join('')}</ul><p>${deadline}</p>
     ${useful.length ? `<div class="group-label">近期可報名、會計入教學能力提升的課程</div>
@@ -2392,7 +2393,8 @@ async function renderNursing() {
   // 提報：已符合認證／展延資格、尚未送出的人可以勾選提報，送到師培中心「審查」頁（資料列權限只回傳範圍內的申請）
   const { data: pend } = await sb.from('applications').select('emp_id').eq('status', '審核中');
   const pending = new Set((pend || []).map(a => a.emp_id));
-  const canSubmit = r => r.can_apply && !pending.has(r.emp_id) && (r.track_type === 'initial' || r.track_type === 'renewal');
+  // 主管不能把自己列入提報（2026-11-10）：本人的認證由上一層主管或師培中心提報
+  const canSubmit = r => r.can_apply && !pending.has(r.emp_id) && (r.track_type === 'initial' || r.track_type === 'renewal') && (r.emp_id !== state.me?.emp_id || isAdmin());
   state.nbSel = new Set([...(state.nbSel || [])].filter(e => list.some(r => r.emp_id === e && canSubmit(r))));
   const isValid = r => !!(r.ve && r.ve >= t);
   const in12 = (() => { const d = new Date(`${t}T00:00:00`); d.setMonth(d.getMonth() + 12); return d.toISOString().slice(0, 10); })();
