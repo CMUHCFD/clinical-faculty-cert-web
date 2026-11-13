@@ -622,6 +622,7 @@ function recordsTable(records, info, ref) {
 }
 // ───────── 網站版本紀錄（頁尾「版本紀錄」，師培中心人員可看）；更新程式時在最前面加一筆，並同步 index.html 的 ?v= ─────────
 const SITE_VERSIONS = [
+  ['20261113a', '2026-11-13', ['新增「主治醫師」專區（師培中心限定，直接連結 #vs）：年度考核分數分佈與名單、核心教師名單', '核心教師可由師培中心管理者登錄「核心場域教學」「臨床教練工作坊 facilitator」，依時數加分（與核心教師課程共用 20 分上限）']],
   ['20261110a', '2026-11-10', ['主管在「護理部概況」與人員頁不能把自己列入提報；本人的認證由上一層主管或師培中心提報（伺服器同步擋下）']],
   ['20261109a', '2026-11-09', ['停用個人提報認證：同仁本人頁與免登入查詢不再有「申請」按鈕，認證名單一律由單位（職類）主管或師培中心提報（伺服器同步擋下）']],
   ['20261030a', '2026-10-30', ['資安修補：使用紀錄頁的程式碼注入漏洞、錯誤次數鎖定改為原子操作（須執行 016 並重新部署 activate、lookup）、管理者帳號不能只憑身分證字號重設密碼', '外部程式庫固定版本並加上完整性檢查', '頁尾新增網站版本與版本紀錄']],
@@ -761,6 +762,8 @@ async function boot() {
   if (isAdmin()) views.push(['logs', '使用紀錄']);
   if (state.role === 'super_admin') views.push(['admin', '管理']);
   // 護理部認證概況（取代 Power BI）：師培中心人員、護理職類管理人與護理部單位主管；護理主管放在第一個
+  // 主治醫師專區（年度考核＋核心教師）：只給師培中心
+  if (isCfd()) views.splice(views.findIndex(v => v[0] === 'all') + 1, 0, ['vs', '主治醫師']);
   if (canNursing()) { if (isCfd()) views.splice(views.findIndex(v => v[0] === 'all') + 1, 0, ['nursing', '護理部概況']); else views.unshift(['nursing', '護理部概況']); }
   // 護理主管（護理長、督導）：只留教師概況、自己單位的師生比、醫事職類認證規範；職類管理人另有訓練計畫
   if (nurseHead()) views.splice(0, views.length, ['nursing', '護理部概況'], ['ratio', '師生比'], ...(state.me.scope_profession && !(state.me.scope_units || []).length && state.me.profession === state.me.scope_profession ? [['plan', '訓練計畫']] : []), ['rules', '認證規範']);
@@ -783,10 +786,11 @@ async function boot() {
   }
   // 專用連結：…/#nursing 登入後直接開護理部概況
   if (location.hash === '#nursing' && canNursing()) return go('nursing');
+  if (location.hash === '#vs' && isCfd()) return go('vs');   // 主治醫師專區
   go(views[0][0]);
 }
 // 選單：項目多（管理者、承辦人員）時依性質收成幾組下拉；項目少（一般同仁、主管）時照舊一排
-const NAV_GROUPS = [['總覽', ['all', 'nursing', 'progress', 'ratio']], ['名單與審查', ['dept', 'expiry', 'review', 'roster']], ['課程', ['courses', 'coursestats', 'plan']],
+const NAV_GROUPS = [['總覽', ['all', 'vs', 'nursing', 'progress', 'ratio']], ['名單與審查', ['dept', 'expiry', 'review', 'roster']], ['課程', ['courses', 'coursestats', 'plan']],
   ['反映與紀錄', ['calls', 'logs']], ['個人與規範', ['mine', 'rules']], ['系統', ['admin']]];
 function renderNav(views) {
   const btn = ([v, t]) => `<button type="button" data-view="${v}">${t}</button>`;
@@ -835,7 +839,7 @@ function go(view, arg) {
   $('nav').querySelectorAll('button[data-view]').forEach(b => b.classList.toggle('is-active', b.dataset.view === view));
   $('nav').querySelectorAll('.nav-grp').forEach(g => g.classList.toggle('is-active', !!g.querySelector('button.is-active')));
   $('content').innerHTML = '<div class="card empty">載入中…</div>';
-  const run = { mine: () => renderPerson(state.me.emp_id), person: () => renderPerson(arg, true), dept: renderList, all: renderOverview, progress: renderProgress, nursing: renderNursing,
+  const run = { mine: () => renderPerson(state.me.emp_id), person: () => renderPerson(arg, true), dept: renderList, all: renderOverview, progress: renderProgress, nursing: renderNursing, vs: renderVs,
     courses: renderCourses, rules: renderRules, ratio: renderRatio, coursestats: renderCourseStats, calls: renderCalls, logs: renderLogs, plan: () => { state.planId = arg || null; return renderPlanPage(); }, review: renderReview, roster: renderRoster, admin: renderAdmin, expiry: renderExpiry }[view];
   // 連續快速切換頁面時，較早的頁面可能較晚才載完而蓋掉畫面：發現過期就重畫目前頁面
   const token = state.nav = (state.nav || 0) + 1;
@@ -1080,7 +1084,7 @@ function appraisalCard(d, o = {}) {
     </div>
     <p class="appr-next">${esc(nextTip)}</p>
     <div class="tiers">${a.tiers.map(t => `<span class="tier ${t.score === a.base ? 'on' : ''}"><b>${sign(t.score)}</b> ${esc(t.label)}</span>`).join('')}</div>
-    ${(a.coreCourses || []).length ? `<div class="group-label">列入加分的核心教師認證課程</div><ul class="lk-list">
+    ${(a.coreCourses || []).length ? `<div class="group-label">列入加分的核心教師課程與教學活動</div><ul class="lk-list">
       ${a.coreCourses.map(c => `<li><span class="lk-date">${Number(c.date.slice(5, 7))}/${Number(c.date.slice(8, 10))}</span><span class="lk-title">${esc(c.title)}<small>${esc(c.item)}</small></span><span class="lk-h">${n(c.hours)}</span></li>`).join('')}</ul>`
       : '<p class="hint">今年度尚無核心教師認證課程（如 SDM 醫病共享決策、EPA 可信賴專業活動、ACGME 臨床教練）。</p>'}
   </section>`;
@@ -2380,6 +2384,115 @@ function annualCard(list) {
     <div class="rule">今年度已達標 <b class="num">${met}</b> / ${annual.length} 人（${Math.round(met / annual.length * 100)}%）${exempt ? `；不列管 ${exempt} 人（行政及其他人員、PGY、代訓醫師等）` : ''}</div>
     <div class="legend"><span><i style="background:var(--success)"></i>已達標</span><span><i style="background:var(--mist)"></i>未達標</span></div>
     ${distRows(annual, r => r.track_type === 'physician' ? `醫師｜${r.cat || ''}` : (r.cat || '其他人員'))}${scoreBlock}</section>`;
+}
+
+// ---------- 主治醫師專區（…/#vs；師培中心限定，使用者 2026-11-13）----------
+// 年度考核分數＋核心教師；核心教師由師培中心管理者登錄「核心場域教學」「臨床教練工作坊 facilitator」，依時數加分（與核心課程共用上限）
+const CORE_KIND = { field: '核心場域教學', facilitator: '工作坊 facilitator' };
+async function renderVs() {
+  if (!isCfd()) { $('content').innerHTML = '<div class="card empty">此頁面僅開放師培中心使用。</div>'; return; }
+  const r1 = v => Math.round((Number(v) || 0) * 10) / 10;
+  const S = state.vs || (state.vs = { tab: 'all', dept: '', q: '', tier: '', open: new Set() });
+  const rows = await fetchAll(() => sb.from('cert_status')
+    .select('emp_id,dept,computed_at,a:detail->appraisal,core:detail->coreCourses,staff!inner(name,title)')
+    .not('detail->>appraisal', 'is', null).order('dept').order('emp_id'));   // ->> 讓 JSON null 變成 SQL NULL（非主治醫師）
+  rememberNames(rows);
+  let acts = [], actErr = '';
+  const ar = await sb.from('core_activities').select('*').order('act_date', { ascending: false });
+  if (ar.error) actErr = '尚未建立核心教師活動資料表（請先在 Supabase 執行 017_core_activities.sql）。'; else acts = ar.data || [];
+  const actsBy = new Map(); acts.forEach(a => actsBy.set(a.emp_id, [...(actsBy.get(a.emp_id) || []), a]));
+  const cy = rows[0] && rows[0].a ? rows[0].a.year : new Date().getFullYear();
+  rows.forEach(r => {
+    const a = r.a || {};
+    const yearList = a.coreCourses || [];
+    r.coreAll = (r.core || []).filter(c => !c.activity);                    // 歷年核心教師認證課程
+    r.isCore = r.coreAll.length > 0;
+    r.courseH = r1(yearList.filter(c => !c.activity).reduce((s, c) => s + Number(c.hours), 0));
+    r.fieldH = r1(yearList.filter(c => c.activity === 'field').reduce((s, c) => s + Number(c.hours), 0));
+    r.faciH = r1(yearList.filter(c => c.activity === 'facilitator').reduce((s, c) => s + Number(c.hours), 0));
+    r.items = [...new Set(r.coreAll.flatMap(c => String(c.item || '核心教師認證課程').split('、')).map(s => s.replace(/核心教師認證$|核心教師$/, '') || s))];
+    r.acts = actsBy.get(r.emp_id) || [];
+  });
+  const vs = rows, core = rows.filter(r => r.isCore);
+  const depts = [...new Set(vs.map(r => r.dept || '（未註明）'))].sort();
+  const tierOf = r => Number(r.a.base);
+  const shown = (S.tab === 'core' ? core : vs).filter(r => (!S.dept || (r.dept || '（未註明）') === S.dept)
+    && (S.tier === '' || tierOf(r) === Number(S.tier))
+    && (!S.q || r.emp_id.toLowerCase().includes(S.q.toLowerCase()) || (r.staff?.name || '').includes(S.q)));
+  const avg = vs.length ? r1(vs.reduce((s, r) => s + Number(r.a.score), 0) / vs.length) : 0;
+  const tierN = b => vs.filter(r => tierOf(r) === b).length;
+  const sign = v => (v > 0 ? '+' : '') + v;
+  const nm = r => `<button class="btn-link" type="button" onclick="go('person',${jsq(r.emp_id)})">${esc(r.staff?.name || r.emp_id)}</button><br><small class="muted">${esc(r.emp_id)}</small>`;
+  const actRows = r => !r.acts.length ? '<p class="hint" style="margin:6px 0">尚無登錄的教學活動。</p>' : `<table class="vs-acts"><thead><tr><th>日期</th><th>類型</th><th class="num">時數</th><th>場域／工作坊</th><th>備註</th>${isAdmin() ? '<th></th>' : ''}</tr></thead><tbody>
+    ${r.acts.map(a => `<tr${Number(a.act_date.slice(0, 4)) === cy ? '' : ' class="muted"'}><td>${esc(a.act_date)}</td><td>${esc(CORE_KIND[a.kind] || a.kind)}</td><td class="num">${r1(a.hours)}</td><td>${esc(a.place || '')}</td><td>${esc(a.note || '')}</td>
+      ${isAdmin() ? `<td><button class="btn-link danger" type="button" onclick="vsDelAct(${Number(a.id)})">刪除</button></td>` : ''}</tr>`).join('')}</tbody></table>`;
+  const allTable = `<table><thead><tr><th>姓名</th><th>科部</th><th>職稱</th><th class="num">今年時數</th><th class="num">教學能力提升</th><th class="num">基本分</th><th class="num">核心加分</th><th class="num">年度分數</th><th>核心教師</th></tr></thead><tbody>
+    ${shown.map(r => `<tr><td>${nm(r)}</td><td>${esc(r.dept || '')}</td><td>${esc(r.staff?.title || '')}</td><td class="num">${r1(r.a.hours)}</td><td class="num">${r1(r.a.teaching)}</td>
+      <td class="num">${sign(tierOf(r))}</td><td class="num">${Number(r.a.bonus) ? '+' + r1(r.a.bonus) : '—'}</td><td class="num"><b>${r1(r.a.score)}</b></td><td>${r.isCore ? '<span class="pill eligible">核心教師</span>' : ''}</td></tr>`).join('')}</tbody></table>`;
+  const coreTable = `<table><thead><tr><th>姓名</th><th>科部</th><th>核心教師課程</th><th class="num">今年課程</th><th class="num">核心場域教學</th><th class="num">工作坊 facilitator</th><th class="num">核心加分</th><th class="num">年度分數</th><th></th></tr></thead><tbody>
+    ${shown.map(r => `<tr><td>${nm(r)}</td><td>${esc(r.dept || '')}</td><td><small>${esc(r.items.join('、'))}</small></td>
+      <td class="num">${r.courseH || '—'}</td><td class="num">${r.fieldH || '—'}</td><td class="num">${r.faciH || '—'}</td>
+      <td class="num">${Number(r.a.bonus) ? '+' + r1(r.a.bonus) : '—'}${Number(r.a.bonus) >= Number(r.a.bonusCap) ? '<br><small class="muted">已達上限</small>' : ''}</td><td class="num"><b>${r1(r.a.score)}</b></td>
+      <td style="white-space:nowrap">${isAdmin() && !actErr ? `<button class="btn btn-ghost" type="button" onclick="vsAddAct(${jsq(r.emp_id)})">＋登錄</button> ` : ''}<button class="btn-link" type="button" onclick="vsToggle(${jsq(r.emp_id)})">${S.open.has(r.emp_id) ? '收合' : `紀錄（${r.acts.length}）`}</button></td></tr>
+      ${S.open.has(r.emp_id) ? `<tr class="vs-detail"><td colspan="9">${actRows(r)}</td></tr>` : ''}`).join('')}</tbody></table>`;
+  $('content').innerHTML = `
+    <section class="card"><h2 style="margin:0 0 4px">主治醫師｜${cy - 1911} 年度考核與核心教師</h2>
+      <div class="note">年度分數＝基本分（依今年師培時數）＋核心加分。核心加分包含：核心教師認證課程時數，以及師培中心登錄的「核心場域教學」「臨床教練工作坊 facilitator」時數，1 小時 1 分，合計上限 ${esc(vs[0]?.a?.bonusCap ?? 20)} 分。資料時間 ${esc(fmtTime(rows[0]?.computed_at))}</div>
+      ${actErr ? `<div class="note" style="color:var(--crimson)">${esc(actErr)}</div>` : ''}</section>
+    <section class="kpis">
+      <div class="kpi"><b class="num">${vs.length}</b><span>主治醫師</span></div>
+      <div class="kpi" style="--tone:var(--secondary)"><b class="num">${avg}</b><span>平均年度分數</span></div>
+      <div class="kpi" style="--tone:var(--success)"><b class="num">${core.length}</b><span>核心教師</span></div>
+      <div class="kpi" style="--tone:var(--warning)"><b class="num">${core.filter(r => r.fieldH || r.faciH).length}</b><span>今年有登錄教學活動</span></div>
+    </section>
+    <section class="card"><div class="score-dist">
+      ${[[10, '10 分', '達 4 小時含教學 2 小時', 'valid'], [5, '5 分', '達 2–3 小時', 'eligible'], [0, '0 分', '達 1 小時', 'expiring'], [-5, '−5 分', '未達 1 小時', 'expired']]
+        .map(([b, t, d, c]) => `<button type="button" class="sd ${c} ${S.tier !== '' && Number(S.tier) === b ? 'on' : ''}" onclick="state.vs.tier=${S.tier !== '' && Number(S.tier) === b ? "''" : b};renderVs()"><b class="num">${tierN(b)}</b><span>${t}</span><small>${d}</small></button>`).join('')}
+      <div class="sd bonus"><b class="num">${vs.filter(r => Number(r.a.bonus) > 0).length}</b><span>有核心加分</span><small>課程或教學活動</small></div></div></section>
+    <section class="card">
+      <div class="filters" style="align-items:center">
+        <div class="seg">${[['all', `全部主治醫師（${vs.length}）`], ['core', `核心教師（${core.length}）`]].map(([v, t]) => `<button type="button" class="${S.tab === v ? 'is-active' : ''}" onclick="state.vs.tab='${v}';renderVs()">${t}</button>`).join('')}</div>
+        <select id="vsDept"><option value="">全部科部</option>${depts.map(d => `<option ${d === S.dept ? 'selected' : ''}>${esc(d)}</option>`).join('')}</select>
+        <input id="vsQ" type="search" placeholder="姓名或員工編號" value="${esc(S.q)}">
+        ${S.tier !== '' ? `<span class="tag">基本分 ${esc(S.tier)} 分 <button class="btn-link" type="button" onclick="state.vs.tier='';renderVs()">✕</button></span>` : ''}
+        <button class="btn btn-ghost" type="button" id="vsCsv">下載 CSV</button>
+      </div>
+      <p class="hint">共 ${shown.length} 人${S.tab === 'core' ? '｜核心教師＝上過任一門核心教師認證課程（SDM、EPA、ACGME 臨床教練、精準醫學教育等）' : ''}</p>
+      <div class="table-wrap">${shown.length ? (S.tab === 'core' ? coreTable : allTable) : '<p class="hint">沒有符合條件的人員。</p>'}</div>
+    </section>`;
+  $('vsDept').onchange = e => { S.dept = e.target.value; renderVs(); };
+  $('vsQ').onchange = e => { S.q = e.target.value.trim(); renderVs(); };
+  $('vsCsv').onclick = () => download(`主治醫師_${cy - 1911}年度考核與核心教師.csv`, [
+    ['員工編號', '姓名', '科部', '職稱', '今年時數', '教學能力提升', '基本分', '核心教師課程時數(今年)', '核心場域教學時數(今年)', '工作坊facilitator時數(今年)', '核心加分', '年度分數', '核心教師', '核心教師課程項目'],
+    ...shown.map(r => [r.emp_id, r.staff?.name || '', r.dept || '', r.staff?.title || '', r1(r.a.hours), r1(r.a.teaching), tierOf(r), r.courseH, r.fieldH, r.faciH, r1(r.a.bonus), r1(r.a.score), r.isCore ? '是' : '', r.items.join('、')])]);
+}
+function vsToggle(emp) { const s = state.vs.open; s.has(emp) ? s.delete(emp) : s.add(emp); renderVs(); }
+function vsAddAct(emp) {
+  let dlg = $('vsDlg');
+  if (!dlg) { dlg = document.createElement('dialog'); dlg.id = 'vsDlg'; document.body.appendChild(dlg); dlg.addEventListener('click', e => { if (e.target === dlg) dlg.close(); }); }
+  dlg.innerHTML = `<form class="dlg-body" id="vsForm">
+    <div class="dlg-head"><h3>登錄核心教師教學活動</h3><button class="btn btn-ghost" type="button" onclick="$('vsDlg').close()">取消</button></div>
+    <p>${empLabel(emp)}</p>
+    <fieldset class="seg-radio"><legend>類型</legend>
+      <label><input type="radio" name="kind" value="field" checked> 在核心場域執行教學</label>
+      <label><input type="radio" name="kind" value="facilitator"> 擔任臨床教練工作坊 facilitator</label></fieldset>
+    <label>日期 <input type="date" name="act_date" required max="${today()}" value="${today()}"></label>
+    <label>時數 <input type="number" name="hours" required min="0.1" max="24" step="0.1" value="1"></label>
+    <label>場域或工作坊名稱 <input type="text" name="place" maxlength="100" placeholder="例如：急診 EPA 場域、115 年臨床教練工作坊"></label>
+    <label>備註 <input type="text" name="note" maxlength="300"></label>
+    <p class="hint">依時數加分（1 小時 1 分），與核心教師認證課程合計，年度上限 20 分；登錄後立即重新計算這位醫師的年度分數。</p>
+    <button class="btn btn-primary" type="submit">登錄</button></form>`;
+  $('vsForm').onsubmit = async e => {
+    e.preventDefault();
+    const f = Object.fromEntries(new FormData(e.target));
+    const d = await act('core.addActivity', { emp_id: emp, ...f });
+    if (d) { dlg.close(); state.vs.open.add(emp); renderVs(); }
+  };
+  dlg.showModal();
+}
+function vsDelAct(id) {
+  if (!confirm('確定刪除這筆教學活動？刪除後會重新計算年度分數。')) return;
+  act('core.removeActivity', { id }, () => renderVs());
 }
 
 // ---------- 護理部認證概況（取代 Power BI；資料每次同步自動更新）----------

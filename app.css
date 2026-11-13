@@ -303,6 +303,17 @@ table.std-t b.must { color: #b3261e; }
 .sd { border-radius: 10px; padding: 10px; display: grid; gap: 2px; background: #eef1f3; }
 .sd b { font-size: 24px; } .sd span { font-weight: 700; } .sd small { color: var(--muted); font-size: 12px; }
 .sd.valid { background: #EDF8F6; } .sd.eligible { background: #EBF5FB; } .sd.expiring { background: #FFFBE6; } .sd.expired { background: #FFF0F1; } .sd.bonus { background: var(--primary-light); }
+/* 主治醫師專區（20261113a）：分數級距可點選篩選、活動紀錄展開列、登錄視窗 */
+button.sd { border: 2px solid transparent; text-align: left; font: inherit; color: inherit; cursor: pointer; }
+button.sd.on { border-color: var(--primary); }
+.vs-detail td { background: #f7f9fa; }
+.vs-acts { width: 100%; font-size: 14px; }
+.vs-acts td, .vs-acts th { padding: 4px 8px; }
+.vs-acts tr.muted td { color: var(--muted); }
+#vsDlg .dlg-body label { display: grid; gap: 4px; margin: 8px 0; }
+#vsDlg fieldset { border: 0; padding: 0; margin: 8px 0; display: grid; gap: 6px; }
+#vsDlg .dlg-body fieldset label { display: flex; gap: 8px; align-items: center; margin: 0; font-weight: 400; }
+#vsDlg .dlg-body fieldset input { width: auto; margin: 0; }
 
 /* 認證規範 */
 .req-you { border-left: 6px solid var(--primary); }
