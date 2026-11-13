@@ -622,6 +622,7 @@ function recordsTable(records, info, ref) {
 }
 // ───────── 網站版本紀錄（頁尾「版本紀錄」，師培中心人員可看）；更新程式時在最前面加一筆，並同步 index.html 的 ?v= ─────────
 const SITE_VERSIONS = [
+  ['20261113b', '2026-11-13', ['主治醫師專區：「全部主治醫師」分頁的核心教師也能直接按「＋登錄」，頁首加上登錄說明']],
   ['20261113a', '2026-11-13', ['新增「主治醫師」專區（師培中心限定，直接連結 #vs）：年度考核分數分佈與名單、核心教師名單', '核心教師可由師培中心管理者登錄「核心場域教學」「臨床教練工作坊 facilitator」，依時數加分（與核心教師課程共用 20 分上限）']],
   ['20261110a', '2026-11-10', ['主管在「護理部概況」與人員頁不能把自己列入提報；本人的認證由上一層主管或師培中心提報（伺服器同步擋下）']],
   ['20261109a', '2026-11-09', ['停用個人提報認證：同仁本人頁與免登入查詢不再有「申請」按鈕，認證名單一律由單位（職類）主管或師培中心提報（伺服器同步擋下）']],
@@ -2428,7 +2429,7 @@ async function renderVs() {
       ${isAdmin() ? `<td><button class="btn-link danger" type="button" onclick="vsDelAct(${Number(a.id)})">刪除</button></td>` : ''}</tr>`).join('')}</tbody></table>`;
   const allTable = `<table><thead><tr><th>姓名</th><th>科部</th><th>職稱</th><th class="num">今年時數</th><th class="num">教學能力提升</th><th class="num">基本分</th><th class="num">核心加分</th><th class="num">年度分數</th><th>核心教師</th></tr></thead><tbody>
     ${shown.map(r => `<tr><td>${nm(r)}</td><td>${esc(r.dept || '')}</td><td>${esc(r.staff?.title || '')}</td><td class="num">${r1(r.a.hours)}</td><td class="num">${r1(r.a.teaching)}</td>
-      <td class="num">${sign(tierOf(r))}</td><td class="num">${Number(r.a.bonus) ? '+' + r1(r.a.bonus) : '—'}</td><td class="num"><b>${r1(r.a.score)}</b></td><td>${r.isCore ? '<span class="pill eligible">核心教師</span>' : ''}</td></tr>`).join('')}</tbody></table>`;
+      <td class="num">${sign(tierOf(r))}</td><td class="num">${Number(r.a.bonus) ? '+' + r1(r.a.bonus) : '—'}</td><td class="num"><b>${r1(r.a.score)}</b></td><td style="white-space:nowrap">${r.isCore ? `<span class="pill eligible">核心教師</span>${isAdmin() && !actErr ? ` <button class="btn btn-ghost" type="button" onclick="vsAddAct(${jsq(r.emp_id)})">＋登錄</button>` : ''}` : ''}</td></tr>`).join('')}</tbody></table>`;
   const coreTable = `<table><thead><tr><th>姓名</th><th>科部</th><th>核心教師課程</th><th class="num">今年課程</th><th class="num">核心場域教學</th><th class="num">工作坊 facilitator</th><th class="num">核心加分</th><th class="num">年度分數</th><th></th></tr></thead><tbody>
     ${shown.map(r => `<tr><td>${nm(r)}</td><td>${esc(r.dept || '')}</td><td><small>${esc(r.items.join('、'))}</small></td>
       <td class="num">${r.courseH || '—'}</td><td class="num">${r.fieldH || '—'}</td><td class="num">${r.faciH || '—'}</td>
@@ -2438,7 +2439,7 @@ async function renderVs() {
   $('content').innerHTML = `
     <section class="card"><h2 style="margin:0 0 4px">主治醫師｜${cy - 1911} 年度考核與核心教師</h2>
       <div class="note">年度分數＝基本分（依今年師培時數）＋核心加分。核心加分包含：核心教師認證課程時數，以及師培中心登錄的「核心場域教學」「臨床教練工作坊 facilitator」時數，1 小時 1 分，合計上限 ${esc(vs[0]?.a?.bonusCap ?? 20)} 分。資料時間 ${esc(fmtTime(rows[0]?.computed_at))}</div>
-      ${actErr ? `<div class="note" style="color:var(--crimson)">${esc(actErr)}</div>` : ''}</section>
+      ${actErr ? `<div class="note" style="color:var(--crimson)">${esc(actErr)}</div>` : isAdmin() ? '<div class="note">登錄「核心場域教學」或「臨床教練工作坊 facilitator」：在核心教師那一列按「＋登錄」。</div>' : ''}</section>
     <section class="kpis">
       <div class="kpi"><b class="num">${vs.length}</b><span>主治醫師</span></div>
       <div class="kpi" style="--tone:var(--secondary)"><b class="num">${avg}</b><span>平均年度分數</span></div>
