@@ -622,6 +622,7 @@ function recordsTable(records, info, ref) {
 }
 // ───────── 網站版本紀錄（頁尾「版本紀錄」，師培中心人員可看）；更新程式時在最前面加一筆，並同步 index.html 的 ?v= ─────────
 const SITE_VERSIONS = [
+  ['20261113d', '2026-11-13', ['主治醫師專區新增「工作坊場次」分頁：列出臨床教練工作坊、EPA、SDM、精準醫學教育課程場次，可依場次一次勾選多位核心教師登錄為 facilitator（報表列為該課程講師者預先勾選）']],
   ['20261113c', '2026-11-13', ['主治醫師專區新增「核心師資庫」分頁：依核心教師種類（精準醫學教育、ACGME 臨床教練、EPA、SDM）分類，列出各人歷年核心場域帶教與工作坊 facilitator 的次數、時數與最近日期，可篩選、下載 CSV']],
   ['20261113b', '2026-11-13', ['主治醫師專區：「全部主治醫師」分頁的核心教師也能直接按「＋登錄」，頁首加上登錄說明']],
   ['20261113a', '2026-11-13', ['新增「主治醫師」專區（師培中心限定，直接連結 #vs）：年度考核分數分佈與名單、核心教師名單', '核心教師可由師培中心管理者登錄「核心場域教學」「臨床教練工作坊 facilitator」，依時數加分（與核心教師課程共用 20 分上限）']],
@@ -2448,6 +2449,30 @@ async function renderVs() {
       <td style="white-space:nowrap">${isAdmin() && !actErr ? `<button class="btn btn-ghost" type="button" onclick="vsAddAct(${jsq(r.emp_id)})">＋登錄</button> ` : ''}<button class="btn-link" type="button" onclick="vsToggle(${jsq(r.emp_id)})">${S.open.has(r.emp_id) ? '收合' : `紀錄（${r.acts.length}）`}</button></td></tr>
       ${S.open.has(r.emp_id) ? `<tr class="vs-detail"><td colspan="9">${actRows(r)}</td></tr>` : ''}`).join('')}</tbody></table>`;
   const roc = d => d ? `${Number(d.slice(0, 4)) - 1911}/${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}` : '';
+  // 工作坊場次：場次清單由伺服器提供（course_stats）；報表列為該課程講師的核心教師當作建議名單
+  const sessTab = S.tab === 'sessions';
+  let sessHtml = '';
+  if (sessTab) {
+    if (!state.vsSess) { try { state.vsSess = (await api('core.sessions')).sessions || []; } catch (e) { state.vsSess = []; sessHtml = `<p class="hint" style="color:var(--crimson)">場次清單載入失敗：${esc(e.message)}</p>`; } }
+    if (!state.vsLect) {
+      const L = core.length ? await fetchAll(() => sb.from('cert_status').select('emp_id,lc:detail->lecturer->courses').in('emp_id', core.map(r => r.emp_id)).order('emp_id')) : [];
+      state.vsLect = new Map(L.map(x => [x.emp_id, new Set((x.lc || []).map(c => c.title))]));
+    }
+    state.vsCore = core; state.vsActs = acts;
+    const SC = { coach: '臨床教練工作坊', epa: 'EPA', sdm: 'SDM', precision: '精準醫學教育', all: '全部' };
+    const cat = S.cat || 'coach';
+    const list = state.vsSess.filter(s => cat === 'all' || s.cat === cat);
+    const regd = s => acts.filter(a => a.kind === 'facilitator' && a.act_date === s.date && a.place === s.title);
+    const lectOf = s => core.filter(r => (state.vsLect.get(r.emp_id) || new Set()).has(s.title));
+    state.vsSessList = list;
+    sessHtml += `<div class="seg" style="margin:8px 0">${Object.entries(SC).map(([k, t]) => `<button type="button" class="${cat === k ? 'is-active' : ''}" onclick="state.vs.cat='${k}';renderVs()">${t}（${k === 'all' ? state.vsSess.length : state.vsSess.filter(s => s.cat === k).length}）</button>`).join('')}</div>
+      <p class="hint">場次來自 e-learning 開課報表（每次「更新資料」同步）；日期以課名括號內的上課日為準。「報表講師」＝報表把這位核心教師列為該課程講師，登錄時會預先勾選。</p>
+      ${list.length ? `<div class="table-wrap"><table><thead><tr><th>上課日</th><th>場次</th><th class="num">時數</th><th class="num">通過人次</th><th>已登錄 facilitator</th><th></th></tr></thead><tbody>
+        ${list.map((s, i) => { const R = regd(s), lc = lectOf(s).filter(r => !R.some(a => a.emp_id === r.emp_id));
+          return `<tr><td style="white-space:nowrap">${esc(roc(s.date))}</td><td>${esc(s.title)}<br><small class="muted">${esc(s.org)}</small></td><td class="num">${esc(s.hours)}</td><td class="num">${esc(s.passed)}</td>
+          <td>${R.length ? R.map(a => `<span class="pill valid" style="margin:1px">${esc(nameOf(a.emp_id) || a.emp_id)}</span>`).join(' ') : '<span class="muted">—</span>'}${lc.length ? `<br><small class="muted">報表講師尚未登錄：${lc.length} 位</small>` : ''}</td>
+          <td>${isAdmin() && !actErr ? `<button class="btn btn-ghost" type="button" onclick="vsSessDlg(${i})">登錄 facilitator</button>` : ''}</td></tr>`; }).join('')}</tbody></table></div>` : '<p class="hint">這一類目前沒有場次。</p>'}`;
+  }
   const actCell = s => s.n ? `<b>${s.n}</b> 次・${s.h} 小時<br><small class="muted">最近 ${roc(s.last)}</small>` : '<span class="muted">—</span>';
   const poolCards = `<div class="pool-cards">${TYPES.map(t => { const L = core.filter(r => r.items.includes(t));
     return `<button type="button" class="pool-card ${S.type === t ? 'on' : ''}" onclick="state.vs.type=${S.type === t ? "''" : jsq(t)};renderVs()">
@@ -2475,18 +2500,19 @@ async function renderVs() {
       <div class="sd bonus"><b class="num">${vs.filter(r => Number(r.a.bonus) > 0).length}</b><span>有核心加分</span><small>課程或教學活動</small></div></div></section>
     <section class="card">
       <div class="filters" style="align-items:center">
-        <div class="seg">${[['all', `全部主治醫師（${vs.length}）`], ['core', `核心教師・今年分數（${core.length}）`], ['pool', '核心師資庫']].map(([v, t]) => `<button type="button" class="${S.tab === v ? 'is-active' : ''}" onclick="state.vs.tab='${v}';renderVs()">${t}</button>`).join('')}</div>
-        <select id="vsDept"><option value="">全部科部</option>${depts.map(d => `<option ${d === S.dept ? 'selected' : ''}>${esc(d)}</option>`).join('')}</select>
+        <div class="seg">${[['all', `全部主治醫師（${vs.length}）`], ['core', `核心教師・今年分數（${core.length}）`], ['pool', '核心師資庫'], ['sessions', '工作坊場次']].map(([v, t]) => `<button type="button" class="${S.tab === v ? 'is-active' : ''}" onclick="state.vs.tab='${v}';renderVs()">${t}</button>`).join('')}</div>
+        ${sessTab ? '' : `<select id="vsDept"><option value="">全部科部</option>${depts.map(d => `<option ${d === S.dept ? 'selected' : ''}>${esc(d)}</option>`).join('')}</select>`}
         ${pool ? `<select id="vsAct"><option value="">全部（不論有無教學活動）</option>${Object.entries(ACT_F).map(([k, [t]]) => `<option value="${k}" ${S.act === k ? 'selected' : ''}>${t}</option>`).join('')}</select>` : ''}
-        <input id="vsQ" type="search" placeholder="姓名或員工編號" value="${esc(S.q)}">
+        ${sessTab ? '' : `<input id="vsQ" type="search" placeholder="姓名或員工編號" value="${esc(S.q)}">`}
         ${!pool && S.tier !== '' ? `<span class="tag">基本分 ${esc(S.tier)} 分 <button class="btn-link" type="button" onclick="state.vs.tier='';renderVs()">✕</button></span>` : ''}
         ${pool && S.type ? `<span class="tag">${esc(S.type)} <button class="btn-link" type="button" onclick="state.vs.type='';renderVs()">✕</button></span>` : ''}
-        <button class="btn btn-ghost" type="button" id="vsCsv">下載 CSV</button>
+        ${sessTab ? '' : '<button class="btn btn-ghost" type="button" id="vsCsv">下載 CSV</button>'}
       </div>
-      ${pool ? poolCards : ''}
+      ${sessTab ? sessHtml : `${pool ? poolCards : ''}
       <p class="hint">共 ${shown.length} 人${S.tab === 'core' ? '｜核心教師＝上過任一門核心教師認證課程（SDM、EPA、ACGME 臨床教練、精準醫學教育等）' : pool ? '｜依核心教師種類分類；帶教與 facilitator 為歷年累計（點上方種類卡片篩選）' : ''}</p>
-      <div class="table-wrap">${shown.length ? (S.tab === 'core' ? coreTable : pool ? poolTable : allTable) : '<p class="hint">沒有符合條件的人員。</p>'}</div>
+      <div class="table-wrap">${shown.length ? (S.tab === 'core' ? coreTable : pool ? poolTable : allTable) : '<p class="hint">沒有符合條件的人員。</p>'}</div>`}
     </section>`;
+  if (sessTab) return;
   $('vsDept').onchange = e => { S.dept = e.target.value; renderVs(); };
   $('vsQ').onchange = e => { S.q = e.target.value.trim(); renderVs(); };
   if ($('vsAct')) $('vsAct').onchange = e => { S.act = e.target.value; renderVs(); };
@@ -2497,6 +2523,46 @@ async function renderVs() {
   $('vsCsv').onclick = () => download(`主治醫師_${cy - 1911}年度考核與核心教師.csv`, [
     ['員工編號', '姓名', '科部', '職稱', '今年時數', '教學能力提升', '基本分', '核心教師課程時數(今年)', '核心場域教學時數(今年)', '工作坊facilitator時數(今年)', '核心加分', '年度分數', '核心教師', '核心教師課程項目'],
     ...shown.map(r => [r.emp_id, r.staff?.name || '', r.dept || '', r.staff?.title || '', r1(r.a.hours), r1(r.a.teaching), tierOf(r), r.courseH, r.fieldH, r.faciH, r1(r.a.bonus), r1(r.a.score), r.isCore ? '是' : '', r.items.join('、')])]);
+}
+// 依場次登錄 facilitator：列出全部核心教師，報表列為該課程講師者預先勾選，已登錄者不可再選
+function vsSessDlg(i) {
+  const s = state.vsSessList[i]; if (!s) return;
+  const core = state.vsCore || [], acts = state.vsActs || [];
+  const done = new Set(acts.filter(a => a.kind === 'facilitator' && a.act_date === s.date && a.place === s.title).map(a => a.emp_id));
+  const lect = new Set(core.filter(r => (state.vsLect.get(r.emp_id) || new Set()).has(s.title)).map(r => r.emp_id));
+  const sorted = [...core].sort((a, b) => (lect.has(b.emp_id) - lect.has(a.emp_id)) || (a.dept || '').localeCompare(b.dept || ''));
+  const future = s.date > today();
+  let dlg = $('vsDlg');
+  if (!dlg) { dlg = document.createElement('dialog'); dlg.id = 'vsDlg'; document.body.appendChild(dlg); dlg.addEventListener('click', e => { if (e.target === dlg) dlg.close(); }); }
+  dlg.innerHTML = `<form class="dlg-body" id="vsBatch">
+    <div class="dlg-head"><h3>登錄 facilitator</h3><button class="btn btn-ghost" type="button" onclick="$('vsDlg').close()">取消</button></div>
+    <p><b>${esc(s.title)}</b><br><small class="muted">上課日 ${esc(s.date)}｜${esc(s.org)}</small></p>
+    ${future ? '<p class="hint" style="color:var(--crimson)">這一場還沒到上課日，上課後才能登錄。</p>' : ''}
+    <div class="vs-batch-row"><label>上課日 <input type="date" name="act_date" required max="${today()}" value="${esc(future ? today() : s.date)}"></label>
+      <label>每人時數 <input type="number" name="hours" required min="0.1" max="24" step="0.1" value="${esc(s.hours || 1)}"></label></div>
+    <input type="search" id="vsBatchQ" placeholder="搜尋姓名、員工編號或科部" style="margin:6px 0">
+    <div class="vs-batch-list">${sorted.map(r => `<label data-k="${esc(`${r.emp_id} ${r.staff?.name || ''} ${r.dept || ''}`.toLowerCase())}">
+      <input type="checkbox" name="emp" value="${esc(r.emp_id)}" ${done.has(r.emp_id) ? 'disabled' : lect.has(r.emp_id) ? 'checked' : ''}>
+      <span>${esc(r.staff?.name || r.emp_id)} <small class="muted">${esc(r.emp_id)}｜${esc(r.dept || '')}</small></span>
+      ${done.has(r.emp_id) ? '<span class="pill valid">已登錄</span>' : lect.has(r.emp_id) ? '<span class="pill eligible">報表講師</span>' : ''}</label>`).join('')}</div>
+    <p class="hint">只列出已是核心教師的主治醫師。每人依時數加分（1 小時 1 分，與核心教師課程合計年度上限 20 分）。已勾選 <b id="vsBatchN">0</b> 位。</p>
+    <button class="btn btn-primary" type="submit">登錄勾選的教師</button></form>`;
+  const count = () => { $('vsBatchN').textContent = dlg.querySelectorAll('input[name=emp]:checked').length; };
+  count();
+  dlg.querySelectorAll('input[name=emp]').forEach(c => { c.onchange = count; });
+  $('vsBatchQ').oninput = e => { const q = e.target.value.trim().toLowerCase(); dlg.querySelectorAll('.vs-batch-list label').forEach(l => { l.hidden = !!q && !l.dataset.k.includes(q); }); };
+  $('vsBatch').onsubmit = async e => {
+    e.preventDefault();
+    const f = new FormData(e.target), emps = f.getAll('emp');
+    if (!emps.length) return toast('請勾選至少一位教師', false);
+    if (!confirm(`確定登錄 ${emps.length} 位為「${s.title}」的 facilitator？`)) return;
+    const d = await act('core.addBatch', { emp_ids: emps, kind: 'facilitator', act_date: f.get('act_date'), hours: f.get('hours'), place: s.title });
+    if (d) {
+      if ((d.skipped || []).length) toast(`${d.message}｜略過：${d.skipped.map(x => `${nameOf(x.emp_id) || x.emp_id}（${x.reason}）`).join('、')}`, false);
+      dlg.close(); renderVs();
+    }
+  };
+  dlg.showModal();
 }
 function vsToggle(emp) { const s = state.vs.open; s.has(emp) ? s.delete(emp) : s.add(emp); renderVs(); }
 function vsAddAct(emp) {
