@@ -622,6 +622,7 @@ function recordsTable(records, info, ref) {
 }
 // ───────── 網站版本紀錄（頁尾「版本紀錄」，師培中心人員可看）；更新程式時在最前面加一筆，並同步 index.html 的 ?v= ─────────
 const SITE_VERSIONS = [
+  ['20261113c', '2026-11-13', ['主治醫師專區新增「核心師資庫」分頁：依核心教師種類（精準醫學教育、ACGME 臨床教練、EPA、SDM）分類，列出各人歷年核心場域帶教與工作坊 facilitator 的次數、時數與最近日期，可篩選、下載 CSV']],
   ['20261113b', '2026-11-13', ['主治醫師專區：「全部主治醫師」分頁的核心教師也能直接按「＋登錄」，頁首加上登錄說明']],
   ['20261113a', '2026-11-13', ['新增「主治醫師」專區（師培中心限定，直接連結 #vs）：年度考核分數分佈與名單、核心教師名單', '核心教師可由師培中心管理者登錄「核心場域教學」「臨床教練工作坊 facilitator」，依時數加分（與核心教師課程共用 20 分上限）']],
   ['20261110a', '2026-11-10', ['主管在「護理部概況」與人員頁不能把自己列入提報；本人的認證由上一層主管或師培中心提報（伺服器同步擋下）']],
@@ -2393,7 +2394,7 @@ const CORE_KIND = { field: '核心場域教學', facilitator: '工作坊 facilit
 async function renderVs() {
   if (!isCfd()) { $('content').innerHTML = '<div class="card empty">此頁面僅開放師培中心使用。</div>'; return; }
   const r1 = v => Math.round((Number(v) || 0) * 10) / 10;
-  const S = state.vs || (state.vs = { tab: 'all', dept: '', q: '', tier: '', open: new Set() });
+  const S = state.vs || (state.vs = { tab: 'all', dept: '', q: '', tier: '', open: new Set(), type: '', act: '' });
   const rows = await fetchAll(() => sb.from('cert_status')
     .select('emp_id,dept,computed_at,a:detail->appraisal,core:detail->coreCourses,staff!inner(name,title)')
     .not('detail->>appraisal', 'is', null).order('dept').order('emp_id'));   // ->> 讓 JSON null 變成 SQL NULL（非主治醫師）
@@ -2413,12 +2414,22 @@ async function renderVs() {
     r.faciH = r1(yearList.filter(c => c.activity === 'facilitator').reduce((s, c) => s + Number(c.hours), 0));
     r.items = [...new Set(r.coreAll.flatMap(c => String(c.item || '核心教師認證課程').split('、')).map(s => s.replace(/核心教師認證$|核心教師$/, '') || s))];
     r.acts = actsBy.get(r.emp_id) || [];
+    // 師資庫用：歷年累計（不分年度）
+    const sum = k => { const l = r.acts.filter(x => x.kind === k); return { n: l.length, h: r1(l.reduce((s, x) => s + Number(x.hours), 0)), last: l[0] ? l[0].act_date : '' }; };
+    r.fieldAll = sum('field'); r.faciAll = sum('facilitator');
+    r.since = {}; r.coreAll.forEach(c => String(c.item || '').split('、').forEach(i => { const k = i.replace(/核心教師認證$|核心教師$/, '') || i; if (!r.since[k] || c.date < r.since[k]) r.since[k] = c.date; }));
   });
   const vs = rows, core = rows.filter(r => r.isCore);
   const depts = [...new Set(vs.map(r => r.dept || '（未註明）'))].sort();
   const tierOf = r => Number(r.a.base);
-  const shown = (S.tab === 'core' ? core : vs).filter(r => (!S.dept || (r.dept || '（未註明）') === S.dept)
-    && (S.tier === '' || tierOf(r) === Number(S.tier))
+  // 核心師資庫：依核心教師種類分類，歷年累計是否在核心場域帶教／擔任工作坊 facilitator
+  const TYPES = [...new Set(core.flatMap(r => r.items))].sort((a, b) => core.filter(r => r.items.includes(b)).length - core.filter(r => r.items.includes(a)).length);
+  const ACT_F = { field: ['曾在核心場域帶教', r => r.fieldAll.n > 0], facilitator: ['曾擔任 facilitator', r => r.faciAll.n > 0],
+    both: ['兩者皆有', r => r.fieldAll.n > 0 && r.faciAll.n > 0], none: ['尚無教學活動', r => !r.fieldAll.n && !r.faciAll.n] };
+  const pool = S.tab === 'pool';
+  const shown = (S.tab === 'all' ? vs : core).filter(r => (!S.dept || (r.dept || '（未註明）') === S.dept)
+    && (pool || S.tier === '' || tierOf(r) === Number(S.tier))
+    && (!pool || !S.type || r.items.includes(S.type)) && (!pool || !S.act || ACT_F[S.act][1](r))
     && (!S.q || r.emp_id.toLowerCase().includes(S.q.toLowerCase()) || (r.staff?.name || '').includes(S.q)));
   const avg = vs.length ? r1(vs.reduce((s, r) => s + Number(r.a.score), 0) / vs.length) : 0;
   const tierN = b => vs.filter(r => tierOf(r) === b).length;
@@ -2436,6 +2447,18 @@ async function renderVs() {
       <td class="num">${Number(r.a.bonus) ? '+' + r1(r.a.bonus) : '—'}${Number(r.a.bonus) >= Number(r.a.bonusCap) ? '<br><small class="muted">已達上限</small>' : ''}</td><td class="num"><b>${r1(r.a.score)}</b></td>
       <td style="white-space:nowrap">${isAdmin() && !actErr ? `<button class="btn btn-ghost" type="button" onclick="vsAddAct(${jsq(r.emp_id)})">＋登錄</button> ` : ''}<button class="btn-link" type="button" onclick="vsToggle(${jsq(r.emp_id)})">${S.open.has(r.emp_id) ? '收合' : `紀錄（${r.acts.length}）`}</button></td></tr>
       ${S.open.has(r.emp_id) ? `<tr class="vs-detail"><td colspan="9">${actRows(r)}</td></tr>` : ''}`).join('')}</tbody></table>`;
+  const roc = d => d ? `${Number(d.slice(0, 4)) - 1911}/${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}` : '';
+  const actCell = s => s.n ? `<b>${s.n}</b> 次・${s.h} 小時<br><small class="muted">最近 ${roc(s.last)}</small>` : '<span class="muted">—</span>';
+  const poolCards = `<div class="pool-cards">${TYPES.map(t => { const L = core.filter(r => r.items.includes(t));
+    return `<button type="button" class="pool-card ${S.type === t ? 'on' : ''}" onclick="state.vs.type=${S.type === t ? "''" : jsq(t)};renderVs()">
+      <b>${esc(t)}</b><span class="num">${L.length} 人</span>
+      <small>場域帶教 ${L.filter(r => r.fieldAll.n).length}・facilitator ${L.filter(r => r.faciAll.n).length}</small></button>`; }).join('')}</div>`;
+  const poolTable = `<table><thead><tr><th>姓名</th><th>科部</th><th>職稱</th><th>核心教師種類（取得日期）</th><th>核心場域帶教</th><th>工作坊 facilitator</th><th></th></tr></thead><tbody>
+    ${shown.map(r => `<tr><td>${nm(r)}</td><td>${esc(r.dept || '')}</td><td>${esc(r.staff?.title || '')}</td>
+      <td>${r.items.map(i => `<span class="pill ${i === S.type ? 'valid' : 'eligible'}" style="margin:1px">${esc(i)}<small>（${roc(r.since[i])}）</small></span>`).join(' ')}</td>
+      <td>${actCell(r.fieldAll)}</td><td>${actCell(r.faciAll)}</td>
+      <td style="white-space:nowrap">${isAdmin() && !actErr ? `<button class="btn btn-ghost" type="button" onclick="vsAddAct(${jsq(r.emp_id)})">＋登錄</button> ` : ''}<button class="btn-link" type="button" onclick="vsToggle(${jsq(r.emp_id)})">${S.open.has(r.emp_id) ? '收合' : `紀錄（${r.acts.length}）`}</button></td></tr>
+      ${S.open.has(r.emp_id) ? `<tr class="vs-detail"><td colspan="7">${actRows(r)}</td></tr>` : ''}`).join('')}</tbody></table>`;
   $('content').innerHTML = `
     <section class="card"><h2 style="margin:0 0 4px">主治醫師｜${cy - 1911} 年度考核與核心教師</h2>
       <div class="note">年度分數＝基本分（依今年師培時數）＋核心加分。核心加分包含：核心教師認證課程時數，以及師培中心登錄的「核心場域教學」「臨床教練工作坊 facilitator」時數，1 小時 1 分，合計上限 ${esc(vs[0]?.a?.bonusCap ?? 20)} 分。資料時間 ${esc(fmtTime(rows[0]?.computed_at))}</div>
@@ -2452,17 +2475,25 @@ async function renderVs() {
       <div class="sd bonus"><b class="num">${vs.filter(r => Number(r.a.bonus) > 0).length}</b><span>有核心加分</span><small>課程或教學活動</small></div></div></section>
     <section class="card">
       <div class="filters" style="align-items:center">
-        <div class="seg">${[['all', `全部主治醫師（${vs.length}）`], ['core', `核心教師（${core.length}）`]].map(([v, t]) => `<button type="button" class="${S.tab === v ? 'is-active' : ''}" onclick="state.vs.tab='${v}';renderVs()">${t}</button>`).join('')}</div>
+        <div class="seg">${[['all', `全部主治醫師（${vs.length}）`], ['core', `核心教師・今年分數（${core.length}）`], ['pool', '核心師資庫']].map(([v, t]) => `<button type="button" class="${S.tab === v ? 'is-active' : ''}" onclick="state.vs.tab='${v}';renderVs()">${t}</button>`).join('')}</div>
         <select id="vsDept"><option value="">全部科部</option>${depts.map(d => `<option ${d === S.dept ? 'selected' : ''}>${esc(d)}</option>`).join('')}</select>
+        ${pool ? `<select id="vsAct"><option value="">全部（不論有無教學活動）</option>${Object.entries(ACT_F).map(([k, [t]]) => `<option value="${k}" ${S.act === k ? 'selected' : ''}>${t}</option>`).join('')}</select>` : ''}
         <input id="vsQ" type="search" placeholder="姓名或員工編號" value="${esc(S.q)}">
-        ${S.tier !== '' ? `<span class="tag">基本分 ${esc(S.tier)} 分 <button class="btn-link" type="button" onclick="state.vs.tier='';renderVs()">✕</button></span>` : ''}
+        ${!pool && S.tier !== '' ? `<span class="tag">基本分 ${esc(S.tier)} 分 <button class="btn-link" type="button" onclick="state.vs.tier='';renderVs()">✕</button></span>` : ''}
+        ${pool && S.type ? `<span class="tag">${esc(S.type)} <button class="btn-link" type="button" onclick="state.vs.type='';renderVs()">✕</button></span>` : ''}
         <button class="btn btn-ghost" type="button" id="vsCsv">下載 CSV</button>
       </div>
-      <p class="hint">共 ${shown.length} 人${S.tab === 'core' ? '｜核心教師＝上過任一門核心教師認證課程（SDM、EPA、ACGME 臨床教練、精準醫學教育等）' : ''}</p>
-      <div class="table-wrap">${shown.length ? (S.tab === 'core' ? coreTable : allTable) : '<p class="hint">沒有符合條件的人員。</p>'}</div>
+      ${pool ? poolCards : ''}
+      <p class="hint">共 ${shown.length} 人${S.tab === 'core' ? '｜核心教師＝上過任一門核心教師認證課程（SDM、EPA、ACGME 臨床教練、精準醫學教育等）' : pool ? '｜依核心教師種類分類；帶教與 facilitator 為歷年累計（點上方種類卡片篩選）' : ''}</p>
+      <div class="table-wrap">${shown.length ? (S.tab === 'core' ? coreTable : pool ? poolTable : allTable) : '<p class="hint">沒有符合條件的人員。</p>'}</div>
     </section>`;
   $('vsDept').onchange = e => { S.dept = e.target.value; renderVs(); };
   $('vsQ').onchange = e => { S.q = e.target.value.trim(); renderVs(); };
+  if ($('vsAct')) $('vsAct').onchange = e => { S.act = e.target.value; renderVs(); };
+  if (pool) { $('vsCsv').onclick = () => download(`核心師資庫${S.type ? '_' + S.type : ''}.csv`, [
+    ['員工編號', '姓名', '科部', '職稱', '核心教師種類', '各種類取得日期', '核心場域帶教次數', '核心場域帶教時數', '最近帶教日期', 'facilitator次數', 'facilitator時數', '最近facilitator日期'],
+    ...shown.map(r => [r.emp_id, r.staff?.name || '', r.dept || '', r.staff?.title || '', r.items.join('、'), r.items.map(i => `${i}:${r.since[i] || ''}`).join('；'),
+      r.fieldAll.n, r.fieldAll.h, r.fieldAll.last, r.faciAll.n, r.faciAll.h, r.faciAll.last])]); return; }
   $('vsCsv').onclick = () => download(`主治醫師_${cy - 1911}年度考核與核心教師.csv`, [
     ['員工編號', '姓名', '科部', '職稱', '今年時數', '教學能力提升', '基本分', '核心教師課程時數(今年)', '核心場域教學時數(今年)', '工作坊facilitator時數(今年)', '核心加分', '年度分數', '核心教師', '核心教師課程項目'],
     ...shown.map(r => [r.emp_id, r.staff?.name || '', r.dept || '', r.staff?.title || '', r1(r.a.hours), r1(r.a.teaching), tierOf(r), r.courseH, r.fieldH, r.faciH, r1(r.a.bonus), r1(r.a.score), r.isCore ? '是' : '', r.items.join('、')])]);
