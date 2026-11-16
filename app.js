@@ -418,7 +418,9 @@ function simpleView(d, o = {}) {
     else if (word[q.key]) todo.push(`再上 ${gap} 小時${word[q.key]}`);
   });
   // 期限：每年規範 → 今年 12/31；以效期計算（舊證展延）→ 效期到期日；初次認證沒有期限
-  const yearly = ((d.window || {}).years || []).length === 1;
+  // 舊判斷用「採計年度只有一年」推定每年規範，會把今年才生效的舊制新證誤判成今年 12/31（2026-11-16 修正，645 人受影響）
+  const yearly = d.trackType === 'physician' || d.trackType === 'annual'
+    || (d.regime === 'new' && d.trackType === 'renewal' && !(d.renewal && d.renewal.oldRule));
   const deadline = d.trackType === 'initial' ? '' : yearly || !cert ? `${cy - 1911} 年 12 月 31 日前` : `${roc(cert.valid_end)}前`;
   let next;
   if (d.trackType === 'exempt') next = '';
@@ -622,6 +624,7 @@ function recordsTable(records, info, ref) {
 }
 // ───────── 網站版本紀錄（頁尾「版本紀錄」，師培中心人員可看）；更新程式時在最前面加一筆，並同步 index.html 的 ?v= ─────────
 const SITE_VERSIONS = [
+  ['20261116a', '2026-11-16', ['修正簡單版「我的認證」期限：今年才生效的舊制認證（例如效期 115/10/1–117/9/30）誤顯示「115 年 12 月 31 日前完成」，改為依效期到期日']],
   ['20261113d', '2026-11-13', ['主治醫師專區新增「工作坊場次」分頁：列出臨床教練工作坊、EPA、SDM、精準醫學教育課程場次，可依場次一次勾選多位核心教師登錄為 facilitator（報表列為該課程講師者預先勾選）']],
   ['20261113c', '2026-11-13', ['主治醫師專區新增「核心師資庫」分頁：依核心教師種類（精準醫學教育、ACGME 臨床教練、EPA、SDM）分類，列出各人歷年核心場域帶教與工作坊 facilitator 的次數、時數與最近日期，可篩選、下載 CSV']],
   ['20261113b', '2026-11-13', ['主治醫師專區：「全部主治醫師」分頁的核心教師也能直接按「＋登錄」，頁首加上登錄說明']],
