@@ -624,6 +624,7 @@ function recordsTable(records, info, ref) {
 }
 // ───────── 網站版本紀錄（頁尾「版本紀錄」，師培中心人員可看）；更新程式時在最前面加一筆，並同步 index.html 的 ?v= ─────────
 const SITE_VERSIONS = [
+  ['20261118c', '2026-11-18', ['主治醫師專區以淡紅色標示高階主管（職稱含董事、院長、執行長、顧問，或 9 職等以上），姓名旁加「高階」標籤；寄信提醒名單含高階主管時先跳出確認']],
   ['20261118b', '2026-11-18', ['主治醫師專區寄信提醒改為勾選名單：0 分與 −5 分者可逐一勾選，或用「全選」勾選目前清單（可先依科部、分數級距、搜尋縮小），只提醒勾選的人']],
   ['20261118a', '2026-11-18', ['寄信提醒改用員工名冊「信箱」欄的實際信箱（寄信前選擇本機名冊，不上傳）；名冊查無者才用「員工編號@tool.caaumed.org.tw」']],
   ['20261117a', '2026-11-17', ['主治醫師專區「全部主治醫師」分頁新增「寄信提醒」：年度考核 0 分與 −5 分者，依分數分組開啟 Outlook 郵件（密件副本、每批 25 人），提醒完成年度師培必修線上課程（線上 100 分鐘）；可依科部篩選後再寄', '寄信提醒視窗改為完成率頁與主治醫師頁共用']],
@@ -2398,12 +2399,14 @@ function annualCard(list) {
 // ---------- 主治醫師專區（…/#vs；師培中心限定，使用者 2026-11-13）----------
 // 年度考核分數＋核心教師；核心教師由師培中心管理者登錄「核心場域教學」「臨床教練工作坊 facilitator」，依時數加分（與核心課程共用上限）
 const CORE_KIND = { field: '核心場域教學', facilitator: '工作坊 facilitator' };
+// 高階主管（使用者 2026-11-18）：職稱含 董事／院長／執行長／顧問（含副院長、董事長、顧問主治醫師等），或名冊職等 9 以上；畫面淡紅色標示提醒注意
+const isVip = r => /董事|院長|執行長|顧問/.test(r.staff?.title || '') || Number(r.gr) >= 9;
 async function renderVs() {
   if (!isCfd()) { $('content').innerHTML = '<div class="card empty">此頁面僅開放師培中心使用。</div>'; return; }
   const r1 = v => Math.round((Number(v) || 0) * 10) / 10;
   const S = state.vs || (state.vs = { tab: 'all', dept: '', q: '', tier: '', open: new Set(), type: '', act: '' });
   const rows = await fetchAll(() => sb.from('cert_status')
-    .select('emp_id,dept,computed_at,a:detail->appraisal,core:detail->coreCourses,staff!inner(name,title)')
+    .select('emp_id,dept,computed_at,gr:detail->>jobGrade,a:detail->appraisal,core:detail->coreCourses,staff!inner(name,title)')
     .not('detail->>appraisal', 'is', null).order('dept').order('emp_id'));   // ->> 讓 JSON null 變成 SQL NULL（非主治醫師）
   rememberNames(rows);
   let acts = [], actErr = '';
@@ -2441,7 +2444,7 @@ async function renderVs() {
   const avg = vs.length ? r1(vs.reduce((s, r) => s + Number(r.a.score), 0) / vs.length) : 0;
   const tierN = b => vs.filter(r => tierOf(r) === b).length;
   const sign = v => (v > 0 ? '+' : '') + v;
-  const nm = r => `<button class="btn-link" type="button" onclick="go('person',${jsq(r.emp_id)})">${esc(r.staff?.name || r.emp_id)}</button><br><small class="muted">${esc(r.emp_id)}</small>`;
+  const nm = r => `<button class="btn-link" type="button" onclick="go('person',${jsq(r.emp_id)})">${esc(r.staff?.name || r.emp_id)}</button>${isVip(r) ? ' <span class="vip-tag" title="高階主管：董事、院長、執行長、顧問等職稱或 9 職等以上">高階</span>' : ''}<br><small class="muted">${esc(r.emp_id)}</small>`;
   const actRows = r => !r.acts.length ? '<p class="hint" style="margin:6px 0">尚無登錄的教學活動。</p>' : `<table class="vs-acts"><thead><tr><th>日期</th><th>類型</th><th class="num">時數</th><th>場域／工作坊</th><th>備註</th>${isAdmin() ? '<th></th>' : ''}</tr></thead><tbody>
     ${r.acts.map(a => `<tr${Number(a.act_date.slice(0, 4)) === cy ? '' : ' class="muted"'}><td>${esc(a.act_date)}</td><td>${esc(CORE_KIND[a.kind] || a.kind)}</td><td class="num">${r1(a.hours)}</td><td>${esc(a.place || '')}</td><td>${esc(a.note || '')}</td>
       ${isAdmin() ? `<td><button class="btn-link danger" type="button" onclick="vsDelAct(${Number(a.id)})">刪除</button></td>` : ''}</tr>`).join('')}</tbody></table>`;
@@ -2599,6 +2602,8 @@ function vsPickClear() { state.vs.sel.clear(); document.querySelectorAll('.vs-pi
 function vsRemind() {
   const L = (state.vsAll || []).filter(r => state.vs.sel.has(r.emp_id));
   if (!L.length) return toast('請先勾選要提醒的醫師', false);
+  const vip = L.filter(isVip);
+  if (vip.length && !confirm(`勾選名單中有 ${vip.length} 位高階主管：\n${vip.slice(0, 15).map(r => `${r.staff?.name || r.emp_id}（${r.staff?.title || ''}）`).join('、')}${vip.length > 15 ? '…' : ''}\n\n確定要一起寄提醒嗎？按「取消」可回到名單取消勾選。`)) return;
   const yr = Number(today().slice(0, 4)) - 1911;
   const lookup = `${location.origin}${location.pathname}#lookup`;
   const letter = (score, now) => ({
