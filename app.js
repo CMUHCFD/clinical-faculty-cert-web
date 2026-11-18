@@ -624,6 +624,7 @@ function recordsTable(records, info, ref) {
 }
 // ───────── 網站版本紀錄（頁尾「版本紀錄」，師培中心人員可看）；更新程式時在最前面加一筆，並同步 index.html 的 ?v= ─────────
 const SITE_VERSIONS = [
+  ['20261118e', '2026-11-18', ['主治醫師提醒信改為較溫和的語氣，並說明目前分數、完成 100 分鐘線上課程後可達 5 分（−5 分者 +10、0 分者 +5）']],
   ['20261118d', '2026-11-18', ['寄信提醒視窗可填寄件者信箱（記在這台電腦）、直接修改主旨與內容預覽，並可先寄測試信給自己；寄件者放在收件人欄留存一份']],
   ['20261118c', '2026-11-18', ['主治醫師專區以淡紅色標示高階主管（職稱含董事、院長、執行長、顧問，或 9 職等以上），姓名旁加「高階」標籤；寄信提醒名單含高階主管時先跳出確認']],
   ['20261118b', '2026-11-18', ['主治醫師專區寄信提醒改為勾選名單：0 分與 −5 分者可逐一勾選，或用「全選」勾選目前清單（可先依科部、分數級距、搜尋縮小），只提醒勾選的人']],
@@ -2607,14 +2608,22 @@ function vsRemind() {
   if (vip.length && !confirm(`勾選名單中有 ${vip.length} 位高階主管：\n${vip.slice(0, 15).map(r => `${r.staff?.name || r.emp_id}（${r.staff?.title || ''}）`).join('、')}${vip.length > 15 ? '…' : ''}\n\n確定要一起寄提醒嗎？按「取消」可回到名單取消勾選。`)) return;
   const yr = Number(today().slice(0, 4)) - 1911;
   const lookup = `${location.origin}${location.pathname}#lookup`;
-  const letter = (score, now) => ({
-    list: L.filter(r => Number(r.a.base) === score), group: `主治醫師年度考核${score}分`, title: `目前 ${score === -5 ? '−5' : score} 分`,
-    subject: `【師培中心】${yr} 年度主治醫師年度考核（CFD 構面）提醒`,
-    body: `醫師您好：\n\n依師培中心系統資料（${today()}），您 ${yr} 年度的師培時數${now}，主治醫師年度考核（CFD 構面）基本分目前為 ${score === -5 ? '−5' : score} 分。\n\n` +
-      `本年度師培必修線上課程：\n${VS_REQUIRED_COURSE}\n只要完成線上課程 100 分鐘，即可獲得對應的分數。請於 ${yr} 年 12 月 31 日前完成。\n\n` +
-      `個人進度可至下列網址，以「員工編號＋身分證後 4 碼」查詢：\n${lookup}\n\n如已完成或資料有誤，請洽師培中心。\n\n師資培育中心 敬上`
-  });
-  const groups = [letter(-5, '未達 1 小時'), letter(0, '為 1 小時（未達 2 小時）')].filter(g => g.list.length);
+  // 線上課程 100 分鐘＝2 小時（50 分鐘計 1 小時）→ 基本分達「2 至 3 小時」級的 5 分
+  const GOAL = 5;
+  const letter = (score, now) => {
+    const s = score === -5 ? '−5' : String(score);
+    return {
+      list: L.filter(r => Number(r.a.base) === score), group: `主治醫師年度考核${score}分`, title: `目前 ${s} 分（完成課程可達 ${GOAL} 分，+${GOAL - score}）`,
+      subject: `【師培中心】溫馨提醒：完成 100 分鐘線上課程，年度考核 CFD 構面可達 ${GOAL} 分`,
+      body: `親愛的醫師您好：\n\n感謝您平日在臨床教學上的付出與辛勞。\n\n` +
+        `師培中心依系統資料（${today()}）整理，您 ${yr} 年度目前累計的師培時數${now}，主治醫師年度考核 CFD 構面目前為 ${s} 分。\n\n` +
+        `想跟您分享一個省時的方式：只要完成本年度師培必修線上課程 100 分鐘（計 2 小時），CFD 構面就能達到 ${GOAL} 分，比目前多 ${GOAL - score} 分。課程可以利用零碎時間在線上完成：\n${VS_REQUIRED_COURSE}\n\n` +
+        `建議於 ${yr} 年 12 月 31 日前完成，就能列入今年度的考核。\n\n` +
+        `完成後，可至下列網址以「員工編號＋身分證後 4 碼」查看個人進度（系統資料更新後即可看到）：\n${lookup}\n\n` +
+        `若您已經完成，或對資料有任何疑問，歡迎隨時與師培中心聯繫，我們很樂意協助。\n\n敬祝 平安順心\n\n師資培育中心 敬上`
+    };
+  };
+  const groups = [letter(-5, '未達 1 小時'), letter(0, '為 1 小時以上、未達 2 小時')].filter(g => g.list.length);
   if (!groups.length) return toast('沒有 0 分或 −5 分的主治醫師', false);
   mailDialog(groups);
 }
