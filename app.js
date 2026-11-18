@@ -624,6 +624,8 @@ function recordsTable(records, info, ref) {
 }
 // ───────── 網站版本紀錄（頁尾「版本紀錄」，師培中心人員可看）；更新程式時在最前面加一筆，並同步 index.html 的 ?v= ─────────
 const SITE_VERSIONS = [
+  ['20261118a', '2026-11-18', ['寄信提醒改用員工名冊「信箱」欄的實際信箱（寄信前選擇本機名冊，不上傳）；名冊查無者才用「員工編號@tool.caaumed.org.tw」']],
+  ['20261117a', '2026-11-17', ['主治醫師專區「全部主治醫師」分頁新增「寄信提醒」：年度考核 0 分與 −5 分者，依分數分組開啟 Outlook 郵件（密件副本、每批 25 人），提醒完成年度師培必修線上課程（線上 100 分鐘）；可依科部篩選後再寄', '寄信提醒視窗改為完成率頁與主治醫師頁共用']],
   ['20261116a', '2026-11-16', ['修正簡單版「我的認證」期限：今年才生效的舊制認證（例如效期 115/10/1–117/9/30）誤顯示「115 年 12 月 31 日前完成」，改為依效期到期日']],
   ['20261113d', '2026-11-13', ['主治醫師專區新增「工作坊場次」分頁：列出臨床教練工作坊、EPA、SDM、精準醫學教育課程場次，可依場次一次勾選多位核心教師登錄為 facilitator（報表列為該課程講師者預先勾選）']],
   ['20261113c', '2026-11-13', ['主治醫師專區新增「核心師資庫」分頁：依核心教師種類（精準醫學教育、ACGME 臨床教練、EPA、SDM）分類，列出各人歷年核心場域帶教與工作坊 facilitator 的次數、時數與最近日期，可篩選、下載 CSV']],
@@ -2511,6 +2513,9 @@ async function renderVs() {
         ${pool && S.type ? `<span class="tag">${esc(S.type)} <button class="btn-link" type="button" onclick="state.vs.type='';renderVs()">✕</button></span>` : ''}
         ${sessTab ? '' : '<button class="btn btn-ghost" type="button" id="vsCsv">下載 CSV</button>'}
       </div>
+      ${S.tab === 'all' ? (() => { const L = vs.filter(r => !S.dept || (r.dept || '（未註明）') === S.dept); const m5 = L.filter(r => tierOf(r) === -5).length, z = L.filter(r => tierOf(r) === 0).length;
+        state.vsRemind = L; return m5 + z ? `<div class="vs-remind"><div><b>年度考核 0 分與 −5 分的主治醫師：${m5 + z} 人</b>${S.dept ? `（${esc(S.dept)}）` : ''}<br><small class="muted">−5 分 ${m5} 人、0 分 ${z} 人｜提醒完成年度師培必修線上課程（線上 100 分鐘）</small></div>
+          <button class="btn btn-primary" type="button" onclick="vsRemind()">寄信提醒</button></div>` : ''; })() : ''}
       ${sessTab ? sessHtml : `${pool ? poolCards : ''}
       <p class="hint">共 ${shown.length} 人${S.tab === 'core' ? '｜核心教師＝上過任一門核心教師認證課程（SDM、EPA、ACGME 臨床教練、精準醫學教育等）' : pool ? '｜依核心教師種類分類；帶教與 facilitator 為歷年累計（點上方種類卡片篩選）' : ''}</p>
       <div class="table-wrap">${shown.length ? (S.tab === 'core' ? coreTable : pool ? poolTable : allTable) : '<p class="hint">沒有符合條件的人員。</p>'}</div>`}
@@ -2566,6 +2571,23 @@ function vsSessDlg(i) {
     }
   };
   dlg.showModal();
+}
+// 主治醫師年度考核 0 分／−5 分：提醒完成年度師培必修線上課程（使用者 2026-11-17；課程網址與「線上 100 分鐘」由使用者提供）
+const VS_REQUIRED_COURSE = 'https://cfd.lib.cmuh.org.tw/course/2553';
+function vsRemind() {
+  const L = state.vsRemind || [];
+  const yr = Number(today().slice(0, 4)) - 1911;
+  const lookup = `${location.origin}${location.pathname}#lookup`;
+  const letter = (score, now) => ({
+    list: L.filter(r => Number(r.a.base) === score), group: `主治醫師年度考核${score}分`, title: `目前 ${score === -5 ? '−5' : score} 分`,
+    subject: `【師培中心】${yr} 年度主治醫師年度考核（CFD 構面）提醒`,
+    body: `醫師您好：\n\n依師培中心系統資料（${today()}），您 ${yr} 年度的師培時數${now}，主治醫師年度考核（CFD 構面）基本分目前為 ${score === -5 ? '−5' : score} 分。\n\n` +
+      `本年度師培必修線上課程：\n${VS_REQUIRED_COURSE}\n只要完成線上課程 100 分鐘，即可獲得對應的分數。請於 ${yr} 年 12 月 31 日前完成。\n\n` +
+      `個人進度可至下列網址，以「員工編號＋身分證後 4 碼」查詢：\n${lookup}\n\n如已完成或資料有誤，請洽師培中心。\n\n師資培育中心 敬上`
+  });
+  const groups = [letter(-5, '未達 1 小時'), letter(0, '為 1 小時（未達 2 小時）')].filter(g => g.list.length);
+  if (!groups.length) return toast('沒有 0 分或 −5 分的主治醫師', false);
+  mailDialog(groups);
 }
 function vsToggle(emp) { const s = state.vs.open; s.has(emp) ? s.delete(emp) : s.add(emp); renderVs(); }
 function vsAddAct(emp) {
@@ -2772,8 +2794,11 @@ const pgDone = r => {
   if (['suspended', 'expired', 'remedy'].includes(r.status_code)) return false;
   return Number(r.gap_t || 0) <= 0 && Number(r.gap_b || 0) <= 0 && Number(r.gap_a || 0) <= 0;
 };
-const mailDomain = () => { try { return localStorage.getItem('cfdMailDomain') || 'mail.cmuh.org.tw'; } catch (e) { return 'mail.cmuh.org.tw'; } };
-const mailOf = emp => `${String(emp).trim()}@${mailDomain()}`;
+// 收件信箱：優先用本機名冊「信箱」欄（多數為 另一組代號@tool.caaumed.org.tw，不等於員工編號；只在瀏覽器分頁內使用、不上傳），
+// 名冊查無者才以「員工編號@預設網域」補上（使用者 2026-11-18：預設網域 tool.caaumed.org.tw）
+const mailDomain = () => { try { return localStorage.getItem('cfdMailDomain2') || 'tool.caaumed.org.tw'; } catch (e) { return 'tool.caaumed.org.tw'; } };
+const rosterMail = emp => (state.roster && (state.roster.get(String(emp).trim().toLowerCase()) || {}).email) || '';
+const mailOf = emp => rosterMail(emp) || `${String(emp).trim()}@${mailDomain()}`;
 
 async function renderProgress() {
   const list = await loadList();
@@ -2836,7 +2861,7 @@ async function renderProgress() {
       <button class="btn btn-ghost" type="button" onclick="pgCopy('mail')">複製信箱</button>
       <button class="btn btn-ghost" type="button" onclick="pgCopy('emp')">複製員工編號</button>
       <button class="btn btn-ghost" type="button" onclick="pgCsv()">下載名單（可合併列印）</button>
-      <button class="btn-link" type="button" onclick="pgDomain()">信箱：員工編號@${esc(mailDomain())}</button></div>`;
+      <button class="btn-link" type="button" onclick="pgDomain()">信箱：依名冊「信箱」欄（查無者用 員工編號@${esc(mailDomain())}）</button></div>`;
   $('pgDept').onchange = e => { P.dept = e.target.value; P.sel = new Set(); renderProgress(); };
 }
 function pgPick(emp, on) { on ? state.pg.sel.add(emp) : state.pg.sel.delete(emp); pgBar(); }
@@ -2846,7 +2871,7 @@ const pgSelected = () => (state.list || []).filter(r => state.pg.sel.has(r.emp_i
 function pgDomain() {
   const v = prompt('院內信箱的網域（@ 後面的部分）。寄信時以「員工編號@網域」組成收件人。', mailDomain());
   if (v == null) return;
-  try { localStorage.setItem('cfdMailDomain', v.trim().replace(/^@/, '')); } catch (e) { /* 無法儲存時本次仍用預設 */ }
+  try { localStorage.setItem('cfdMailDomain2', v.trim().replace(/^@/, '')); } catch (e) { /* 無法儲存時本次仍用預設 */ }
   renderProgress();
 }
 async function pgCopy(kind) {
@@ -2866,16 +2891,29 @@ function pgMail() {
   const yr = Number(today().slice(0, 4)) - 1911;
   const subject = `【師培中心】${yr} 年度臨床教師師培時數提醒`;
   const body = `您好：\n\n依師培中心系統資料（${today()}），您 ${yr} 年度應完成的師培時數尚未達標。\n請至下列網址，以「員工編號＋身分證後 4 碼」查詢個人進度與尚缺項目：\n${link}\n\n如已完成或資料有誤，請點查詢頁右下角的小機器人反映，或洽師培中心。\n\n師資培育中心 敬上`;
-  const batches = []; for (let i = 0; i < list.length; i += 25) batches.push(list.slice(i, i + 25));
-  const href = b => `mailto:?bcc=${encodeURIComponent(b.map(r => mailOf(r.emp_id)).join(';'))}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-  const record = (b, i) => api('notify.log', { emp_ids: b.map(r => r.emp_id), channel: 'email', group: `${state.pg.group || ''}${batches.length > 1 ? `｜第 ${i + 1} 批` : ''}` }).catch(() => {});
+  mailDialog([{ list, subject, body, group: state.pg.group || '' }]);
+}
+// 寄信提醒視窗（完成率頁、主治醫師頁共用）：每組各自的主旨與內容，每批 25 人放密件副本，按下開啟時記錄提醒（notify.log）
+async function mailDialog(groups) {
+  const total = groups.reduce((s, g) => s + g.list.length, 0);
+  // 信箱以名冊為準：尚未讀取名冊時先請使用者選擇（取消則全部以「員工編號@預設網域」寄送）
+  if (!state.roster && confirm(`寄信前請選擇您電腦上的員工名冊（user*.xlsx），系統會用名冊「信箱」欄的實際信箱寄送。\n名冊只在這個分頁內使用，不會上傳。\n\n按「取消」則改用「員工編號@${mailDomain()}」（多數人的信箱不是這個格式，可能寄不到）。`)) {
+    try { await pickRoster(); } catch (e) { toast(e.message, false); }
+  }
+  const all1 = groups.flatMap(g => g.list), fromRoster = all1.filter(r => rosterMail(r.emp_id)).length;
+  const all = [];
+  groups.forEach((g, gi) => { const n = Math.ceil(g.list.length / 25); for (let i = 0; i < g.list.length; i += 25) all.push({ g, gi, b: g.list.slice(i, i + 25), k: i / 25, n }); });
+  const href = x => `mailto:?bcc=${encodeURIComponent(x.b.map(r => mailOf(r.emp_id)).join(';'))}&subject=${encodeURIComponent(x.g.subject)}&body=${encodeURIComponent(x.g.body)}`;
+  const record = x => api('notify.log', { emp_ids: x.b.map(r => r.emp_id), channel: 'email', group: `${x.g.group}${x.n > 1 ? `｜第 ${x.k + 1} 批` : ''}` }).catch(() => {});
   let dlg = $('pgDlg');
   if (!dlg) { dlg = document.createElement('dialog'); dlg.id = 'pgDlg'; document.body.appendChild(dlg); dlg.addEventListener('click', e => { if (e.target === dlg) dlg.close(); }); }
-  dlg.innerHTML = `<div class="dlg-body"><div class="dlg-head"><h3>寄信提醒（${list.length} 人）</h3><button class="btn btn-ghost" type="button" onclick="$('pgDlg').close()">關閉</button></div>
+  dlg.innerHTML = `<div class="dlg-body"><div class="dlg-head"><h3>寄信提醒（${total} 人）</h3><button class="btn btn-ghost" type="button" onclick="$('pgDlg').close()">關閉</button></div>
     <p class="hint">按下按鈕會用您電腦上的郵件程式（Outlook）開新郵件，收件人放在<b>密件副本</b>，彼此看不到。請確認內容後再自行按「傳送」。系統會記錄提醒日期，方便之後比對成效。</p>
-    <div class="pg-batches">${batches.map((b, i) => `<a class="btn btn-primary" href="${href(b)}" data-i="${i}">開啟郵件${batches.length > 1 ? `：第 ${i + 1} 批（${b.length} 人）` : ''}</a>`).join('')}</div>
-    <div class="group-label">信件內容（可在郵件程式中修改）</div><pre class="pg-preview">主旨：${esc(subject)}\n\n${esc(body)}</pre></div>`;
-  dlg.querySelectorAll('a[data-i]').forEach(a => { a.onclick = () => { const i = Number(a.dataset.i); if (!a.dataset.done) { a.dataset.done = '1'; record(batches[i], i); } a.classList.replace('btn-primary', 'btn-ghost'); a.textContent += '　✓ 已開啟'; }; });
+    <p class="hint" style="${fromRoster === total ? '' : 'color:var(--crimson)'}">收件信箱：${fromRoster} 人取自名冊「信箱」欄${fromRoster < total ? `；${total - fromRoster} 人名冊查無，改用「員工編號@${esc(mailDomain())}」，可能寄不到` : ''}。</p>
+    ${groups.map((g, gi) => `${groups.length > 1 ? `<div class="group-label">${esc(g.title || g.group)}（${g.list.length} 人）</div>` : ''}
+      <div class="pg-batches">${all.map((x, i) => x.gi !== gi ? '' : `<a class="btn btn-primary" href="${href(x)}" data-i="${i}">開啟郵件${x.n > 1 ? `：第 ${x.k + 1} 批（${x.b.length} 人）` : `（${x.b.length} 人）`}</a>`).join('')}</div>
+      <details${groups.length > 1 ? '' : ' open'}><summary class="hint">信件內容（可在郵件程式中修改）</summary><pre class="pg-preview">主旨：${esc(g.subject)}\n\n${esc(g.body)}</pre></details>`).join('')}</div>`;
+  dlg.querySelectorAll('a[data-i]').forEach(a => { a.onclick = () => { const x = all[Number(a.dataset.i)]; if (!a.dataset.done) { a.dataset.done = '1'; record(x); } a.classList.replace('btn-primary', 'btn-ghost'); a.textContent += '　✓ 已開啟'; }; });
   dlg.showModal();
 }
 
@@ -2929,10 +2967,12 @@ async function pickRoster() {
   const wb = XLSX.read(await file.arrayBuffer());
   const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' });
   const H = rows[0].map(h => String(h).trim()), col = p => H.findIndex(h => h.startsWith(p));
-  const c = { emp: col('帳號'), name: col('中文姓名'), id: col('身分證'), dept: H.indexOf('單位'), title: col('職稱') };
+  const c = { emp: col('帳號'), name: col('中文姓名'), id: col('身分證'), dept: H.indexOf('單位'), title: col('職稱'), mail: H.indexOf('信箱') };
   if (c.emp === -1 || c.name === -1 || c.id === -1) throw new Error('這不是員工名冊：找不到「帳號／中文姓名／身分證」欄位');
+  const mailIn = v => (String(v || '').match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/) || [''])[0];
   state.roster = new Map(rows.slice(1).filter(r => r[c.emp]).map(r => [String(r[c.emp]).trim().toLowerCase(),
-    { name: String(r[c.name]).split(':')[0].trim(), id: String(r[c.id]).trim(), dept: String(r[c.dept] || '').trim(), title: String(r[c.title] || '').replace(/:\d+$/, '').trim() }]));
+    { name: String(r[c.name]).split(':')[0].trim(), id: String(r[c.id]).trim(), dept: String(r[c.dept] || '').trim(), title: String(r[c.title] || '').replace(/:\d+$/, '').trim(),
+      email: c.mail === -1 ? '' : mailIn(r[c.mail]) }]));
   toast(`已讀取名冊 ${state.roster.size} 人（只在這個瀏覽器分頁內使用，不會上傳；關閉分頁即清除）`);
   return state.roster;
 }
