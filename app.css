@@ -658,6 +658,12 @@ dialog.small-dlg::backdrop { background: rgba(22,70,97,.45); }
 .pg-act.on { display: flex; } .pg-act .btn { width: auto; } .pg-act .btn-ghost { background: rgba(255,255,255,.12); color: #fff; border-color: rgba(255,255,255,.3); }
 .pg-act .btn-link { color: #cfe6f3; font-size: 13px; margin-left: auto; }
 .pg-batches { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; } .pg-batches .btn { width: auto; text-decoration: none; }
+.md-from { display: block; font-weight: 600; margin-top: 8px; }
+.md-from input { display: block; width: 100%; max-width: 360px; margin-top: 4px; font-weight: 400; }
+.md-edit { display: grid; gap: 8px; margin: 10px 0; }
+.md-edit label { font-weight: 600; font-size: 14px; }
+.md-edit input, .md-edit textarea { display: block; width: 100%; margin-top: 4px; font: inherit; font-size: 14px; font-weight: 400; box-sizing: border-box; }
+.md-edit textarea { resize: vertical; min-height: 180px; line-height: 1.6; }
 .pg-preview { white-space: pre-wrap; background: var(--bg); border-radius: 8px; padding: 10px 12px; font: inherit; font-size: 14px; max-height: 240px; overflow: auto; }
 td input[type=checkbox], th input[type=checkbox] { width: 18px; height: 18px; margin: 0; }
 

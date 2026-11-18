@@ -624,6 +624,7 @@ function recordsTable(records, info, ref) {
 }
 // ───────── 網站版本紀錄（頁尾「版本紀錄」，師培中心人員可看）；更新程式時在最前面加一筆，並同步 index.html 的 ?v= ─────────
 const SITE_VERSIONS = [
+  ['20261118d', '2026-11-18', ['寄信提醒視窗可填寄件者信箱（記在這台電腦）、直接修改主旨與內容預覽，並可先寄測試信給自己；寄件者放在收件人欄留存一份']],
   ['20261118c', '2026-11-18', ['主治醫師專區以淡紅色標示高階主管（職稱含董事、院長、執行長、顧問，或 9 職等以上），姓名旁加「高階」標籤；寄信提醒名單含高階主管時先跳出確認']],
   ['20261118b', '2026-11-18', ['主治醫師專區寄信提醒改為勾選名單：0 分與 −5 分者可逐一勾選，或用「全選」勾選目前清單（可先依科部、分數級距、搜尋縮小），只提醒勾選的人']],
   ['20261118a', '2026-11-18', ['寄信提醒改用員工名冊「信箱」欄的實際信箱（寄信前選擇本機名冊，不上傳）；名冊查無者才用「員工編號@tool.caaumed.org.tw」']],
@@ -2931,17 +2932,37 @@ async function mailDialog(groups) {
   const all1 = groups.flatMap(g => g.list), fromRoster = all1.filter(r => rosterMail(r.emp_id)).length;
   const all = [];
   groups.forEach((g, gi) => { const n = Math.ceil(g.list.length / 25); for (let i = 0; i < g.list.length; i += 25) all.push({ g, gi, b: g.list.slice(i, i + 25), k: i / 25, n }); });
-  const href = x => `mailto:?bcc=${encodeURIComponent(x.b.map(r => mailOf(r.emp_id)).join(';'))}&subject=${encodeURIComponent(x.g.subject)}&body=${encodeURIComponent(x.g.body)}`;
+  // 寄件者：記在這台電腦（localStorage）；放在「收件人」欄，收件者以密件副本寄出，自己也會收到一份留存
+  let from = ''; try { from = localStorage.getItem('cfdMailFrom') || ''; } catch (e) { /* 無法讀取時留空 */ }
+  // 主旨與內容以視窗裡（可修改）的版本為準
+  const textOf = gi => ({ subject: $(`mdSub${gi}`).value, body: $(`mdBody${gi}`).value });
+  const href = (to, bcc, t) => `mailto:${encodeURIComponent(to)}?${bcc.length ? `bcc=${encodeURIComponent(bcc.join(';'))}&` : ''}subject=${encodeURIComponent(t.subject)}&body=${encodeURIComponent(t.body)}`;
   const record = x => api('notify.log', { emp_ids: x.b.map(r => r.emp_id), channel: 'email', group: `${x.g.group}${x.n > 1 ? `｜第 ${x.k + 1} 批` : ''}` }).catch(() => {});
   let dlg = $('pgDlg');
   if (!dlg) { dlg = document.createElement('dialog'); dlg.id = 'pgDlg'; document.body.appendChild(dlg); dlg.addEventListener('click', e => { if (e.target === dlg) dlg.close(); }); }
   dlg.innerHTML = `<div class="dlg-body"><div class="dlg-head"><h3>寄信提醒（${total} 人）</h3><button class="btn btn-ghost" type="button" onclick="$('pgDlg').close()">關閉</button></div>
-    <p class="hint">按下按鈕會用您電腦上的郵件程式（Outlook）開新郵件，收件人放在<b>密件副本</b>，彼此看不到。請確認內容後再自行按「傳送」。系統會記錄提醒日期，方便之後比對成效。</p>
+    <p class="hint"><b>步驟：</b>① 填寄件者信箱 → ② 預覽並修改下方信件 → ③ 可先「寄測試信給自己」 → ④ 按「開啟郵件」，Outlook 會帶出草稿（收件者放<b>密件副本</b>，彼此看不到），確認後由您自己按「傳送」。網站不會自動寄出。</p>
+    <label class="md-from">寄件者（您的信箱）<input id="mdFrom" type="email" placeholder="例如 033643@tool.caaumed.org.tw" value="${esc(from)}"></label>
+    <p class="hint" style="margin-top:4px">信會從 Outlook 目前登入的帳號寄出；這裡填的信箱會放在「收件人」欄，您自己也會收到一份留存。若 Outlook 有多個帳號，請在草稿的「寄件者」選這個帳號。</p>
     <p class="hint" style="${fromRoster === total ? '' : 'color:var(--crimson)'}">收件信箱：${fromRoster} 人取自名冊「信箱」欄${fromRoster < total ? `；${total - fromRoster} 人名冊查無，改用「員工編號@${esc(mailDomain())}」，可能寄不到` : ''}。</p>
     ${groups.map((g, gi) => `${groups.length > 1 ? `<div class="group-label">${esc(g.title || g.group)}（${g.list.length} 人）</div>` : ''}
-      <div class="pg-batches">${all.map((x, i) => x.gi !== gi ? '' : `<a class="btn btn-primary" href="${href(x)}" data-i="${i}">開啟郵件${x.n > 1 ? `：第 ${x.k + 1} 批（${x.b.length} 人）` : `（${x.b.length} 人）`}</a>`).join('')}</div>
-      <details${groups.length > 1 ? '' : ' open'}><summary class="hint">信件內容（可在郵件程式中修改）</summary><pre class="pg-preview">主旨：${esc(g.subject)}\n\n${esc(g.body)}</pre></details>`).join('')}</div>`;
-  dlg.querySelectorAll('a[data-i]').forEach(a => { a.onclick = () => { const x = all[Number(a.dataset.i)]; if (!a.dataset.done) { a.dataset.done = '1'; record(x); } a.classList.replace('btn-primary', 'btn-ghost'); a.textContent += '　✓ 已開啟'; }; });
+      <div class="md-edit"><label>主旨<input id="mdSub${gi}" value="${esc(g.subject)}"></label>
+        <label>內容<textarea id="mdBody${gi}" rows="10">${esc(g.body)}</textarea></label></div>
+      <div class="pg-batches"><button class="btn btn-ghost" type="button" data-test="${gi}">寄測試信給自己</button>
+        ${all.map((x, i) => x.gi !== gi ? '' : `<button class="btn btn-primary" type="button" data-i="${i}">開啟郵件${x.n > 1 ? `：第 ${x.k + 1} 批（${x.b.length} 人）` : `（${x.b.length} 人）`}</button>`).join('')}</div>`).join('')}</div>`;
+  const getFrom = () => {
+    const v = $('mdFrom').value.trim();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)) { toast('請先填寫正確的寄件者信箱', false); $('mdFrom').focus(); return null; }
+    try { localStorage.setItem('cfdMailFrom', v); } catch (e) { /* 無法儲存時本次仍可用 */ }
+    return v;
+  };
+  dlg.querySelectorAll('button[data-test]').forEach(b => { b.onclick = () => { const f = getFrom(); if (f) location.href = href(f, [], textOf(Number(b.dataset.test))); }; });
+  dlg.querySelectorAll('button[data-i]').forEach(b => { b.onclick = () => {
+    const f = getFrom(); if (!f) return;
+    const x = all[Number(b.dataset.i)];
+    location.href = href(f, x.b.map(r => mailOf(r.emp_id)), textOf(x.gi));
+    if (!b.dataset.done) { b.dataset.done = '1'; record(x); b.classList.replace('btn-primary', 'btn-ghost'); b.textContent += '　✓ 已開啟'; }
+  }; });
   dlg.showModal();
 }
 
