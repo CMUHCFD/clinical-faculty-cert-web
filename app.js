@@ -624,6 +624,7 @@ function recordsTable(records, info, ref) {
 }
 // ───────── 網站版本紀錄（頁尾「版本紀錄」，師培中心人員可看）；更新程式時在最前面加一筆，並同步 index.html 的 ?v= ─────────
 const SITE_VERSIONS = [
+  ['20261118b', '2026-11-18', ['主治醫師專區寄信提醒改為勾選名單：0 分與 −5 分者可逐一勾選，或用「全選」勾選目前清單（可先依科部、分數級距、搜尋縮小），只提醒勾選的人']],
   ['20261118a', '2026-11-18', ['寄信提醒改用員工名冊「信箱」欄的實際信箱（寄信前選擇本機名冊，不上傳）；名冊查無者才用「員工編號@tool.caaumed.org.tw」']],
   ['20261117a', '2026-11-17', ['主治醫師專區「全部主治醫師」分頁新增「寄信提醒」：年度考核 0 分與 −5 分者，依分數分組開啟 Outlook 郵件（密件副本、每批 25 人），提醒完成年度師培必修線上課程（線上 100 分鐘）；可依科部篩選後再寄', '寄信提醒視窗改為完成率頁與主治醫師頁共用']],
   ['20261116a', '2026-11-16', ['修正簡單版「我的認證」期限：今年才生效的舊制認證（例如效期 115/10/1–117/9/30）誤顯示「115 年 12 月 31 日前完成」，改為依效期到期日']],
@@ -2444,8 +2445,13 @@ async function renderVs() {
   const actRows = r => !r.acts.length ? '<p class="hint" style="margin:6px 0">尚無登錄的教學活動。</p>' : `<table class="vs-acts"><thead><tr><th>日期</th><th>類型</th><th class="num">時數</th><th>場域／工作坊</th><th>備註</th>${isAdmin() ? '<th></th>' : ''}</tr></thead><tbody>
     ${r.acts.map(a => `<tr${Number(a.act_date.slice(0, 4)) === cy ? '' : ' class="muted"'}><td>${esc(a.act_date)}</td><td>${esc(CORE_KIND[a.kind] || a.kind)}</td><td class="num">${r1(a.hours)}</td><td>${esc(a.place || '')}</td><td>${esc(a.note || '')}</td>
       ${isAdmin() ? `<td><button class="btn-link danger" type="button" onclick="vsDelAct(${Number(a.id)})">刪除</button></td>` : ''}</tr>`).join('')}</tbody></table>`;
-  const allTable = `<table><thead><tr><th>姓名</th><th>科部</th><th>職稱</th><th class="num">今年時數</th><th class="num">教學能力提升</th><th class="num">基本分</th><th class="num">核心加分</th><th class="num">年度分數</th><th>核心教師</th></tr></thead><tbody>
-    ${shown.map(r => `<tr><td>${nm(r)}</td><td>${esc(r.dept || '')}</td><td>${esc(r.staff?.title || '')}</td><td class="num">${r1(r.a.hours)}</td><td class="num">${r1(r.a.teaching)}</td>
+  // 寄信提醒：只有 0 分、−5 分的人可以勾選（信件內容是針對這兩級寫的）
+  S.sel = S.sel || new Set();
+  const canPick = r => tierOf(r) <= 0;
+  state.vsAll = vs; state.vsPickable = shown.filter(canPick).map(r => r.emp_id);
+  const pickAll = state.vsPickable.length && state.vsPickable.every(e => S.sel.has(e));
+  const allTable = `<table><thead><tr><th style="width:36px">${state.vsPickable.length ? `<input type="checkbox" id="vsAllBox" aria-label="全選目前清單中 0 分與 −5 分者" title="全選目前清單中 0 分與 −5 分者" ${pickAll ? 'checked' : ''} onchange="vsPickAll(this.checked)">` : ''}</th><th>姓名</th><th>科部</th><th>職稱</th><th class="num">今年時數</th><th class="num">教學能力提升</th><th class="num">基本分</th><th class="num">核心加分</th><th class="num">年度分數</th><th>核心教師</th></tr></thead><tbody>
+    ${shown.map(r => `<tr><td>${canPick(r) ? `<input type="checkbox" class="vs-pick" value="${esc(r.emp_id)}" aria-label="勾選提醒" ${S.sel.has(r.emp_id) ? 'checked' : ''} onchange="vsPick(this.value,this.checked)">` : ''}</td><td>${nm(r)}</td><td>${esc(r.dept || '')}</td><td>${esc(r.staff?.title || '')}</td><td class="num">${r1(r.a.hours)}</td><td class="num">${r1(r.a.teaching)}</td>
       <td class="num">${sign(tierOf(r))}</td><td class="num">${Number(r.a.bonus) ? '+' + r1(r.a.bonus) : '—'}</td><td class="num"><b>${r1(r.a.score)}</b></td><td style="white-space:nowrap">${r.isCore ? `<span class="pill eligible">核心教師</span>${isAdmin() && !actErr ? ` <button class="btn btn-ghost" type="button" onclick="vsAddAct(${jsq(r.emp_id)})">＋登錄</button>` : ''}` : ''}</td></tr>`).join('')}</tbody></table>`;
   const coreTable = `<table><thead><tr><th>姓名</th><th>科部</th><th>核心教師課程</th><th class="num">今年課程</th><th class="num">核心場域教學</th><th class="num">工作坊 facilitator</th><th class="num">核心加分</th><th class="num">年度分數</th><th></th></tr></thead><tbody>
     ${shown.map(r => `<tr><td>${nm(r)}</td><td>${esc(r.dept || '')}</td><td><small>${esc(r.items.join('、'))}</small></td>
@@ -2513,9 +2519,11 @@ async function renderVs() {
         ${pool && S.type ? `<span class="tag">${esc(S.type)} <button class="btn-link" type="button" onclick="state.vs.type='';renderVs()">✕</button></span>` : ''}
         ${sessTab ? '' : '<button class="btn btn-ghost" type="button" id="vsCsv">下載 CSV</button>'}
       </div>
-      ${S.tab === 'all' ? (() => { const L = vs.filter(r => !S.dept || (r.dept || '（未註明）') === S.dept); const m5 = L.filter(r => tierOf(r) === -5).length, z = L.filter(r => tierOf(r) === 0).length;
-        state.vsRemind = L; return m5 + z ? `<div class="vs-remind"><div><b>年度考核 0 分與 −5 分的主治醫師：${m5 + z} 人</b>${S.dept ? `（${esc(S.dept)}）` : ''}<br><small class="muted">−5 分 ${m5} 人、0 分 ${z} 人｜提醒完成年度師培必修線上課程（線上 100 分鐘）</small></div>
-          <button class="btn btn-primary" type="button" onclick="vsRemind()">寄信提醒</button></div>` : ''; })() : ''}
+      ${S.tab === 'all' ? (() => { const m5 = shown.filter(r => tierOf(r) === -5).length, z = shown.filter(r => tierOf(r) === 0).length;
+        return m5 + z || S.sel.size ? `<div class="vs-remind"><div><b>寄信提醒：年度考核 0 分與 −5 分</b>（目前清單中 −5 分 ${m5} 人、0 分 ${z} 人）<br>
+          <small class="muted">勾選要提醒的醫師（表頭方框＝全選目前清單），提醒完成年度師培必修線上課程（線上 100 分鐘）。可先用科部、分數級距或搜尋縮小清單。</small></div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end"><button class="btn btn-ghost" type="button" onclick="vsPickAll(true)">全選</button><button class="btn btn-ghost" type="button" onclick="vsPickClear()">清除勾選</button>
+          <button class="btn btn-primary" type="button" id="vsRemindBtn" onclick="vsRemind()" ${S.sel.size ? '' : 'disabled'}>寄信提醒（已勾選 <span id="vsSelN">${S.sel.size}</span> 人）</button></div></div>` : ''; })() : ''}
       ${sessTab ? sessHtml : `${pool ? poolCards : ''}
       <p class="hint">共 ${shown.length} 人${S.tab === 'core' ? '｜核心教師＝上過任一門核心教師認證課程（SDM、EPA、ACGME 臨床教練、精準醫學教育等）' : pool ? '｜依核心教師種類分類；帶教與 facilitator 為歷年累計（點上方種類卡片篩選）' : ''}</p>
       <div class="table-wrap">${shown.length ? (S.tab === 'core' ? coreTable : pool ? poolTable : allTable) : '<p class="hint">沒有符合條件的人員。</p>'}</div>`}
@@ -2574,8 +2582,23 @@ function vsSessDlg(i) {
 }
 // 主治醫師年度考核 0 分／−5 分：提醒完成年度師培必修線上課程（使用者 2026-11-17；課程網址與「線上 100 分鐘」由使用者提供）
 const VS_REQUIRED_COURSE = 'https://cfd.lib.cmuh.org.tw/course/2553';
+// 勾選只更新畫面上的數字，不重新載入整頁
+function vsSelSync() {
+  const S = state.vs, n = S.sel.size;
+  if ($('vsSelN')) $('vsSelN').textContent = n;
+  if ($('vsRemindBtn')) $('vsRemindBtn').disabled = !n;
+  if ($('vsAllBox')) $('vsAllBox').checked = state.vsPickable.length > 0 && state.vsPickable.every(e => S.sel.has(e));
+}
+function vsPick(emp, on) { on ? state.vs.sel.add(emp) : state.vs.sel.delete(emp); vsSelSync(); }
+function vsPickAll(on) {
+  (state.vsPickable || []).forEach(e => (on ? state.vs.sel.add(e) : state.vs.sel.delete(e)));
+  document.querySelectorAll('.vs-pick').forEach(c => { c.checked = state.vs.sel.has(c.value); });
+  vsSelSync();
+}
+function vsPickClear() { state.vs.sel.clear(); document.querySelectorAll('.vs-pick').forEach(c => { c.checked = false; }); vsSelSync(); }
 function vsRemind() {
-  const L = state.vsRemind || [];
+  const L = (state.vsAll || []).filter(r => state.vs.sel.has(r.emp_id));
+  if (!L.length) return toast('請先勾選要提醒的醫師', false);
   const yr = Number(today().slice(0, 4)) - 1911;
   const lookup = `${location.origin}${location.pathname}#lookup`;
   const letter = (score, now) => ({
