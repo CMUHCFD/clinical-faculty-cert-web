@@ -624,6 +624,7 @@ function recordsTable(records, info, ref) {
 }
 // ───────── 網站版本紀錄（頁尾「版本紀錄」，師培中心人員可看）；更新程式時在最前面加一筆，並同步 index.html 的 ?v= ─────────
 const SITE_VERSIONS = [
+  ['20261120a', '2026-11-20', ['初次認證與中途申請的預計效期改為「決議通過之次月 1 日起，至第四年 12/31」（3＋N 年，不超過四年）；認證規範頁的過渡規定同步更新']],
   ['20261118e', '2026-11-18', ['主治醫師提醒信改為較溫和的語氣，並說明目前分數、完成 100 分鐘線上課程後可達 5 分（−5 分者 +10、0 分者 +5）']],
   ['20261118d', '2026-11-18', ['寄信提醒視窗可填寄件者信箱（記在這台電腦）、直接修改主旨與內容預覽，並可先寄測試信給自己；寄件者放在收件人欄留存一份']],
   ['20261118c', '2026-11-18', ['主治醫師專區以淡紅色標示高階主管（職稱含董事、院長、執行長、顧問，或 9 職等以上），姓名旁加「高階」標籤；寄信提醒名單含高階主管時先跳出確認']],
@@ -1519,7 +1520,7 @@ async function renderRules() {
         ? `<li><b>效期一律到 12/31：</b>${T.extend_to_year_end_years.map(rocY).join('、')} 年在年中到期的證書，效期延至到期當年 12/31（效期總長不超過四年，依醫策會作業程序「至多四年」），年底統一辦理展延，新證自次年 1/1 起四年。</li>`
         : '<li><b>展延接續、效期到 12/31：</b>原效期不變。展延後的新效期從原效期到期的隔天開始，到「到期那一年起算第四年」的 12/31（不超過醫策會「至多四年」）；原效期剛好到 12/31 的人，新效期為完整四年。新證開始的那一年不另計年度時數。</li>'}
       <li><b>舊證照舊規定：</b>效期起日在 ${rocY(T.new_rule_cert_start.slice(0, 4))}/${Number(T.new_rule_cert_start.slice(5, 7))}/${Number(T.new_rule_cert_start.slice(8, 10))} 之前的證書，依原規定展延（效期屆滿前二年內 ${L.renewal_total ?? 8} 點），不追溯每年四小時；換發新證後才適用每年四小時。</li>
-      <li><b>年中認證：</b>經科部每季提報者，自下一季的第一天（1/1、4/1、7/1、10/1）生效，效期至生效年度起算第四年度 12/31。效期不是從 1/1 開始的，生效當年度不另計年度時數。</li>
+      <li><b>年中認證：</b>由科部於臨培會議提報，決議通過才列入監測，自次月 1 日生效，效期至生效年度起算第四年度 12/31（3＋N 年，不超過四年；例：11/18 決議通過 → 12/1 至第四年 12/31）。效期不是從 1/1 開始的，生效當年度不另計年度時數。</li>
       ${(T.counseling_years || []).length ? `<li><b>輔導年（試行）：</b>${T.counseling_years.map(rocY).join('、')} 年未完成每年四小時者，只提醒、不暫停資格；之後的年度未完成，次年 1/1 起暫停資格，補滿後次月恢復。</li>` : ''}
     </ol>
     <div class="note">${(T.extend_to_year_end_years || []).length
@@ -2998,13 +2999,10 @@ function certPeriod(r, ref, regime) {
       const ey = Number(prev.slice(0, 4));
       if (prev.slice(5) === '12-31') { start = `${ey + 1}-01-01`; end = `${ey + years}-12-31`; }
       else { const d = new Date(`${prev}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + 1); start = d.toISOString().slice(0, 10); end = `${ey + years - 1}-12-31`; }
-    } else if (prev) {
+    } else {
+      // 效期已屆滿或初次認證：決議通過之次月 1 日起，至生效年度起算第四年度 12/31（與 status-runner.nextPeriod 相同）
       const i = Number(t.slice(0, 4)) * 12 + Number(t.slice(5, 7));
       start = `${Math.floor(i / 12)}-${pad((i % 12) + 1)}-01`; end = `${Math.floor(i / 12) + years - 1}-12-31`;
-    } else {
-      const cy = Number(t.slice(0, 4));
-      const qs = ((state.rules.transition || {}).quarterly_starts || ['01-01']).map(q => `${cy}-${q}`).filter(d => d > t).sort();
-      start = qs[0] || `${cy + 1}-01-01`; end = `${Number(start.slice(0, 4)) + years - 1}-12-31`;
     }
   }
   return { start: roc(start), end: roc(end) };
