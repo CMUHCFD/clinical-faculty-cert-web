@@ -382,8 +382,9 @@ function printCert() {
   w.document.close();
 }
 
-// 個人提報認證已停用（使用者 2026-11-09 決定）：一律由單位／職類主管提報給師培中心，同仁本人不用送件
-const SELF_APPLY_NOTE = '臨床教師認證名單由所屬單位（職類）主管提報給師培中心，您不需要自行申請；如有疑問請洽單位主管或師培中心。';
+// 個人提報（2026-11-09）與主管線上提報（2026-11-23）皆已取消：年度名單由科部依訓練計畫需求提報，
+// 中途申請在臨培會議提報、決議通過後由師培中心登錄
+const SELF_APPLY_NOTE = '臨床教師認證名單由科部依訓練計畫需求每年提報；年度中途需要認證者，於臨床教學暨師資培育會議提報，決議通過後由師培中心辦理。系統上不需要個人或主管送件，如有疑問請洽師培中心。';
 function simpleView(d, o = {}) {
   const n = v => Math.round((Number(v) || 0) * 10) / 10;
   const roc = s => s ? `${Number(s.slice(0, 4)) - 1911} 年 ${Number(s.slice(5, 7))} 月 ${Number(s.slice(8, 10))} 日` : '';
@@ -425,7 +426,7 @@ function simpleView(d, o = {}) {
   let next;
   if (d.trackType === 'exempt') next = '';
   else if (pending) next = '等通知就好。';
-  else if (eligible) next = '你已符合資格；認證名單由單位主管提報給師培中心，不用自己送件。';
+  else if (eligible) next = '你已符合資格；認證名單由科部提報、師培中心辦理，不用自己送件。';
   else if (!todo.length) next = '目前不用再上課，繼續保持。';
   else next = `${deadline ? `請在 ${deadline}完成：` : '完成下面這些就可以申請：'}`;
   // ③ 我的學習路線（一句話）
@@ -624,6 +625,7 @@ function recordsTable(records, info, ref) {
 }
 // ───────── 網站版本紀錄（頁尾「版本紀錄」，師培中心人員可看）；更新程式時在最前面加一筆，並同步 index.html 的 ?v= ─────────
 const SITE_VERSIONS = [
+  ['20261123a', '2026-11-23', ['取消個人與主管線上提報臨床教師認證：護理部概況、到期與提報、個人頁不再有提報按鈕，主管改為只看「已符合資格」名單；只有師培中心可代為登錄']],
   ['20261120a', '2026-11-20', ['初次認證與中途申請的預計效期改為「決議通過之次月 1 日起，至第四年 12/31」（3＋N 年，不超過四年）；認證規範頁的過渡規定同步更新']],
   ['20261118e', '2026-11-18', ['主治醫師提醒信改為較溫和的語氣，並說明目前分數、完成 100 分鐘線上課程後可達 5 分（−5 分者 +10、0 分者 +5）']],
   ['20261118d', '2026-11-18', ['寄信提醒視窗可填寄件者信箱（記在這台電腦）、直接修改主旨與內容預覽，並可先寄測試信給自己；寄件者放在收件人欄留存一份']],
@@ -1320,7 +1322,7 @@ function personHTML(o) {
       <div class="rule">員工編號 ${o.lookup ? `${esc(empId)} <span class="nm">${esc(o.name || '')}</span>` : empLabel(empId)}｜${esc(staff?.dept || '')}｜${esc(staff?.title || '')}｜${esc(staff?.profession || '')}${cert ? `｜認證效期 ${esc(cert.valid_start_roc)}–${esc(cert.valid_end_roc)}${cert.extended_from ? `（原至 ${esc(cert.extended_from_roc)}，依過渡規定延至年底）` : ''}` : ''}</div>
       <div class="reason">${esc(d.statusReason)}</div>
       ${(d.recommendations || []).length ? `<ul class="recs">${d.recommendations.map(r => `<li>${esc(r)}</li>`).join('')}</ul>` : ''}
-      ${certTrack && canAct && !pending && o.role !== 'general' && (empId !== state.me?.emp_id || isAdmin()) ? `<details class="apply"><summary class="btn ${d.initialEligible || d.renewalCompliant ? 'btn-primary' : 'btn-ghost'}" style="width:auto">${
+      ${certTrack && canAct && !pending && isAdmin() ? `<details class="apply"><summary class="btn ${d.initialEligible || d.renewalCompliant ? 'btn-primary' : 'btn-ghost'}" style="width:auto">${
           d.initialEligible || d.renewalCompliant
             ? `代為提報臨床教師認證（${d.trackType === 'renewal' ? '展延' : '新增'}）`
             : '點數尚未達標；若另有院外修課時數，可按此代為提報'}</summary>
@@ -1355,7 +1357,7 @@ function personHTML(o) {
   const who = own ? '您' : '這位同仁';
   let nextBody;
   if (pending) nextBody = `<p>${who}的認證申請正在審核中，暫時不需要其他動作。</p>`;
-  else if (eligible) nextBody = `<p><b>${who}已符合資格。</b>${o.lookup || o.role === 'general' || (empId === state.me?.emp_id && !isAdmin()) ? SELF_APPLY_NOTE : '請在上方按「代為提報」，名單會送到師培中心。'}</p>`;
+  else if (eligible) nextBody = `<p><b>${who}已符合資格。</b>${!o.lookup && isAdmin() ? '可在上方按「代為提報」登錄。' : SELF_APPLY_NOTE}</p>`;
   else if (!gaps.length) nextBody = `<p>目前不需要補修。${cert ? `認證效期至 ${esc(cert.valid_end_roc)}。` : ''}</p>`;
   else nextBody = `<ul class="recs">${gaps.map(g => `<li>${esc(g)}</li>`).join('')}</ul><p>${deadline}</p>
     ${useful.length ? `<div class="group-label">近期可報名、會計入教學能力提升的課程</div>
@@ -2669,7 +2671,10 @@ async function renderNursing() {
   const { data: pend } = await sb.from('applications').select('emp_id').eq('status', '審核中');
   const pending = new Set((pend || []).map(a => a.emp_id));
   // 主管不能把自己列入提報（2026-11-10）：本人的認證由上一層主管或師培中心提報
-  const canSubmit = r => r.can_apply && !pending.has(r.emp_id) && (r.track_type === 'initial' || r.track_type === 'renewal') && (r.emp_id !== state.me?.emp_id || isAdmin());
+  // 2026-11-23：主管提報功能取消，名單改由科部年度提報／臨培會議決議後由師培中心登錄；主管只看誰已符合資格
+  const ready = r => r.can_apply && !pending.has(r.emp_id) && (r.track_type === 'initial' || r.track_type === 'renewal');
+  const canSubmit = r => ready(r) && isAdmin();
+  const readyLabel = isAdmin() ? '可提報（尚未送出）' : '已符合資格';
   state.nbSel = new Set([...(state.nbSel || [])].filter(e => list.some(r => r.emp_id === e && canSubmit(r))));
   const isValid = r => !!(r.ve && r.ve >= t);
   const in12 = (() => { const d = new Date(`${t}T00:00:00`); d.setMonth(d.getMonth() + 12); return d.toISOString().slice(0, 10); })();
@@ -2692,7 +2697,7 @@ async function renderNursing() {
     <div class="kpi"><b class="num">${scoped.length.toLocaleString()}</b><span>護理人員</span></div>
     <div class="kpi" style="--tone:var(--success)"><b class="num">${V.toLocaleString()}</b><span>持有效認證（${rate(scoped)}%）</span></div>
     <div class="kpi" style="--tone:var(--warning)"><b class="num">${cnt(scoped, 'soon')}</b><span>一年內到期</span></div>
-    <button type="button" class="kpi" style="--tone:var(--secondary)" onclick="state.nf.status='submit';renderNursing();document.getElementById('nbList').scrollIntoView({behavior:'smooth'})"><b class="num">${scoped.filter(canSubmit).length}</b><span>可提報（尚未送出）›</span></button></section>
+    <button type="button" class="kpi" style="--tone:var(--secondary)" onclick="state.nf.status='submit';renderNursing();document.getElementById('nbList').scrollIntoView({behavior:'smooth'})"><b class="num">${scoped.filter(ready).length}</b><span>${readyLabel} ›</span></button></section>
     ${scoped.some(r => pending.has(r.emp_id)) ? `<p class="hint" style="margin:-4px 0 0">另有 ${scoped.filter(r => pending.has(r.emp_id)).length} 人已提報，師培中心審核中。</p>` : ''}`;
   // ② 全體分布色帶
   const band = `<div class="nb-band">${Object.keys(CLS).map(k => { const v = cnt(scoped, k); return v ? `<i style="flex:${v};background:${CLS[k][1]}" title="${CLS[k][0]} ${v} 人"></i>` : ''; }).join('')}</div>
@@ -2710,7 +2715,7 @@ async function renderNursing() {
   uRows.sort((a, b) => sortKey === 'n' ? b.n - a.n : sortKey === 'soon' ? b.soon - a.soon : a.rate - b.rate || b.n - a.n);
   const watch = uRows.filter(u => u.n >= 5).sort((a, b) => a.rate - b.rate).slice(0, 5);
   // ⑥ 人員名單（點單位、能階或狀態篩選）
-  const stOk = r => !F.status || (F.status === 'submit' ? canSubmit(r) : F.status === 'pend' ? pending.has(r.emp_id) : cls(r) === F.status);
+  const stOk = r => !F.status || (F.status === 'submit' ? ready(r) : F.status === 'pend' ? pending.has(r.emp_id) : cls(r) === F.status);
   const people = scoped.filter(r => (!F.unit || (r.dept || '（未註明）') === F.unit) && stOk(r)
     && (!F.q || r.emp_id.toLowerCase().includes(F.q.toLowerCase()) || (r.staff?.name || '').includes(F.q)));
   people.sort((a, b) => (a.dept || '').localeCompare(b.dept || '') || (a.ve || '9').localeCompare(b.ve || '9'));
@@ -2718,16 +2723,17 @@ async function renderNursing() {
   const tag = (k, v) => v ? `<b>${esc(k)}</b> ${esc(v)}　<button class="btn-link" type="button" onclick="state.nf.${k === '單位' ? 'unit' : k === '能階' ? 'level' : 'status'}='';renderNursing()">✕</button>` : '';
   const pRow = (r, withUnit = true) => `<tr><td>${canSubmit(r) ? `<input type="checkbox" aria-label="提報" ${state.nbSel.has(r.emp_id) ? 'checked' : ''} onchange="nbPick(${jsq(r.emp_id)},this.checked)">` : pending.has(r.emp_id) ? '<small class="muted">審核中</small>' : ''}</td>
         <td><button class="btn-link" type="button" onclick="go('person',${jsq(r.emp_id)})">${empLabel(r.emp_id)}</button></td>${withUnit ? `<td>${esc(r.dept)}</td>` : ''}<td>${esc(r.staff?.title || '')}</td>
-        <td><span class="pill" style="background:${CLS[cls(r)][1]};color:${cls(r) === 'none' ? 'var(--text)' : '#fff'}">${CLS[cls(r)][0]}</span>${pending.has(r.emp_id) ? ' <span class="pill expiring">已提報・審核中</span>' : canSubmit(r) && cls(r) !== 'can' ? ' <span class="pill eligible">可提報展延</span>' : ''}</td><td>${esc(r.valid_end || '')}</td>
+        <td><span class="pill" style="background:${CLS[cls(r)][1]};color:${cls(r) === 'none' ? 'var(--text)' : '#fff'}">${CLS[cls(r)][0]}</span>${pending.has(r.emp_id) ? ' <span class="pill expiring">已提報・審核中</span>' : ready(r) && cls(r) !== 'can' ? ` <span class="pill eligible">${isAdmin() ? '可提報展延' : '已符合展延'}</span>` : ''}</td><td>${esc(r.valid_end || '')}</td>
         <td class="num">${esc(r.teach)} / ${esc(r.need)}</td><td class="reason">${esc(r.reason)}</td></tr>`;
   const listTools = `<div class="filters" style="align-items:center">
-        <select id="nbSt" style="width:auto"><option value="">所有狀態</option><option value="submit" ${F.status === 'submit' ? 'selected' : ''}>可提報（尚未送出）</option><option value="pend" ${F.status === 'pend' ? 'selected' : ''}>已提報・審核中</option>${Object.keys(CLS).map(k => `<option value="${k}" ${F.status === k ? 'selected' : ''}>${CLS[k][0]}</option>`).join('')}</select>
+        <select id="nbSt" style="width:auto"><option value="">所有狀態</option><option value="submit" ${F.status === 'submit' ? 'selected' : ''}>${readyLabel}</option><option value="pend" ${F.status === 'pend' ? 'selected' : ''}>已提報・審核中</option>${Object.keys(CLS).map(k => `<option value="${k}" ${F.status === k ? 'selected' : ''}>${CLS[k][0]}</option>`).join('')}</select>
         <input id="nbQ" type="search" placeholder="員工編號或姓名" value="${esc(F.q)}" style="flex:1;min-width:160px">
         <button class="btn btn-ghost" type="button" id="nbCsv">下載名單</button></div>
       ${people.some(canSubmit) ? `<div class="nb-submit"><span>已勾選 <b id="nbSelN">${state.nbSel.size}</b> 人</span>
         <button class="btn btn-ghost" type="button" onclick="nbSelAll()">勾選名單中可提報的 ${people.filter(canSubmit).length} 人</button>
         <button class="btn btn-primary" type="button" onclick="nbSubmit()">提報給師培中心審核</button>
-        <small>送出後由師培中心在「審查」頁審核，結果會更新在這裡。</small></div>` : ''}`;
+        <small>送出後由師培中心在「審查」頁審核，結果會更新在這裡。</small></div>`
+        : !isAdmin() && people.some(ready) ? `<p class="hint">${esc(SELF_APPLY_NOTE)}</p>` : ''}`;
   // 幾個單位的主管：一開始只列單位，點開看單位內人員（有篩選或搜尋時，自動展開有符合人員的單位）
   const nfOpen = state.nfOpen = state.nfOpen || new Set();
   const filtering = !!(F.status || F.q);
@@ -3178,7 +3184,7 @@ async function renderExpiry() {
   const rows = cur.rows.filter(r => !ex.group || profGroup(r) === ex.group)
     .sort((a, b) => Number(drop(b)) - Number(drop(a)) || Number(ready(a)) - Number(ready(b)) || a.emp_id.localeCompare(b.emp_id));
   const exportable = isAdmin() && mode !== 'new';
-  const submittable = state.role === 'dept_coordinator' && mode !== 'new' && mode !== 'both';
+  const submittable = false;   // 主管提報已取消（2026-11-23）
   const canPick = exportable || submittable ? rows.filter(r => r.can_apply && !pecEx(r.emp_id)) : [];
   const gap = r => {
     if (!r) return '—';
